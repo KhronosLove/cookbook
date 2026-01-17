@@ -37,7 +37,30 @@ export default function SettingsPage() {
   const fetchIngredients = async () => { const { data } = await supabase.from('ingredients_library').select('*').order('name'); setIngredients(data || []) }
   const fetchProducts = async () => { const { data } = await supabase.from('products_library').select('*').order('name'); setProducts(data || []) }
 
-  const handleAddTag = async () => { if (!newTagName) return; const { error } = await supabase.from('defined_tags').insert([{ category: newTagCat, name: newTagName }]); if (!error) { setNewTagName(''); fetchTags() } }
+  // --- 修复重点：添加标签时获取 user_id ---
+  const handleAddTag = async () => { 
+    if (!newTagName) return; 
+    
+    // 1. 获取当前用户
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+
+    // 2. 插入时带上 user_id
+    const { error } = await supabase.from('defined_tags').insert([{ 
+      user_id: user.id, // <--- 这里是关键
+      category: newTagCat, 
+      name: newTagName 
+    }]); 
+
+    if (!error) { 
+      setNewTagName(''); 
+      fetchTags() 
+    } else {
+      console.error(error)
+      alert('添加失败，请重试')
+    }
+  }
+
   const handleDeleteTag = async (id) => { if(!confirm('删除标签?')) return; await supabase.from('defined_tags').delete().eq('id', id); fetchTags() }
   const handleDeleteRecipe = async (id) => { if(!confirm('删除菜谱?')) return; await supabase.from('recipes').delete().eq('id', id); fetchRecipes() }
   const handleDeleteItem = async (id, type) => { if(!confirm('删除?')) return; await supabase.from(type === 'ingredient' ? 'ingredients_library' : 'products_library').delete().eq('id', id); type === 'ingredient' ? fetchIngredients() : fetchProducts() }
@@ -46,16 +69,32 @@ export default function SettingsPage() {
   const openEditModal = (item, type) => { setEditingItem(item || {}); setModalType(type); if (item) { setFormData({ name: item.name, calories: item.calories || 0, protein: item.protein || 0, fat: item.fat || 0, carbs: item.carbs || 0, image_url: item.image_url || '' }) } else { setFormData({ name: '', calories: 0, protein: 0, fat: 0, carbs: 0, image_url: '' }) } }
   const handleFormChange = (field, value) => { const newData = { ...formData, [field]: value }; if (['protein', 'fat', 'carbs'].includes(field)) { newData.calories = (parseFloat(newData.protein || 0) * 4) + (parseFloat(newData.carbs || 0) * 4) + (parseFloat(newData.fat || 0) * 9) }; setFormData(newData) }
   const handleImageUpload = async (e) => { const file = e.target.files[0]; if (!file) return; setUploading(true); try { const fileExt = file.name.split('.').pop(); const filePath = `thumbs/${Math.random()}.${fileExt}`; const { error } = await supabase.storage.from('recipe-images').upload(filePath, file); if (error) throw error; const { data } = supabase.storage.from('recipe-images').getPublicUrl(filePath); setFormData(prev => ({ ...prev, image_url: data.publicUrl })) } catch (err) { alert('上传失败') } finally { setUploading(false) } }
-  const handleSaveItem = async () => { const { data: { user } } = await supabase.auth.getUser(); const table = modalType === 'ingredient' ? 'ingredients_library' : 'products_library'; const payload = { user_id: user.id, name: formData.name, image_url: formData.image_url, calories: parseFloat(formData.calories), protein: parseFloat(formData.protein), fat: parseFloat(formData.fat), carbs: parseFloat(formData.carbs) }; if (editingItem.id) await supabase.from(table).update(payload).eq('id', editingItem.id); else await supabase.from(table).insert([payload]); setEditingItem(null); modalType === 'ingredient' ? fetchIngredients() : fetchProducts() }
+  
+  const handleSaveItem = async () => { 
+    const { data: { user } } = await supabase.auth.getUser(); 
+    const table = modalType === 'ingredient' ? 'ingredients_library' : 'products_library'; 
+    const payload = { 
+      user_id: user.id, 
+      name: formData.name, 
+      image_url: formData.image_url, 
+      calories: parseFloat(formData.calories), 
+      protein: parseFloat(formData.protein), 
+      fat: parseFloat(formData.fat), 
+      carbs: parseFloat(formData.carbs) 
+    }; 
+    if (editingItem.id) await supabase.from(table).update(payload).eq('id', editingItem.id); 
+    else await supabase.from(table).insert([payload]); 
+    setEditingItem(null); 
+    modalType === 'ingredient' ? fetchIngredients() : fetchProducts() 
+  }
 
-  // --- 列表渲染 (修复：电脑/手机分离) ---
+  // --- 列表渲染 ---
   const renderList = (data, type) => {
     const filtered = data.filter(i => (i.name || i.title).toLowerCase().includes(search.toLowerCase()))
     
     return (
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
         
-        {/* --- 表头 --- */}
         {/* Desktop Header */}
         <div className="hidden sm:grid grid-cols-12 bg-gray-50 p-3 text-xs text-gray-500 font-medium border-b border-gray-100">
           <div className="col-span-5 pl-2">名称</div>
@@ -78,16 +117,12 @@ export default function SettingsPage() {
           <div className="w-16 flex-shrink-0"></div> 
         </div>
         
-        {/* --- 列表内容 (分离实现) --- */}
         <div className="divide-y">
           {filtered.map(item => (
             <div key={item.id}>
               
-              {/* =======================
-                  1. Desktop View (Grid) 
-                  ======================= */}
+              {/* Desktop View */}
               <div className="hidden sm:grid grid-cols-12 p-3 items-center text-sm hover:bg-gray-50 transition-colors">
-                {/* 5列: 图片+名称 */}
                 <div className="col-span-5 flex items-center gap-3 overflow-hidden pr-2">
                   <div className="w-8 h-8 rounded bg-gray-100 shrink-0 overflow-hidden border border-gray-200">
                     {(item.image_url || item.cover_image) ? (
@@ -99,7 +134,6 @@ export default function SettingsPage() {
                   <div className="font-bold text-gray-900 truncate">{item.name || item.title}</div>
                 </div>
 
-                {/* 数据列 */}
                 {type !== 'recipe' ? (
                   <>
                     <div className="col-span-2 text-center font-mono text-gray-900">{Math.round(item.calories)}</div>
@@ -109,20 +143,15 @@ export default function SettingsPage() {
                   <div className="col-span-5 text-center text-xs text-gray-500">{new Date(item.created_at).toLocaleDateString()}</div>
                 )}
 
-                {/* 2列: 操作 */}
                 <div className="col-span-2 flex justify-center gap-3 text-gray-400">
                   <button onClick={() => { if (type === 'recipe') router.push(`/recipes/${item.id}/edit`); else openEditModal(item, type) }} className="hover:text-blue-600"><Edit3 size={14}/></button>
                   <button onClick={() => { if (type === 'recipe') handleDeleteRecipe(item.id); else handleDeleteItem(item.id, type) }} className="hover:text-red-600"><Trash2 size={14}/></button>
                 </div>
               </div>
 
-              {/* =======================
-                  2. Mobile View (Flex) 
-                  ======================= */}
+              {/* Mobile View */}
               <div className="sm:hidden p-3 flex items-center justify-between gap-0 hover:bg-gray-50 transition-colors">
-                {/* 左侧：内容 (Flex-1) */}
                 <div className="flex-1 flex items-center gap-3 overflow-hidden pr-2">
-                  {/* 图片 */}
                   <div className="w-10 h-10 rounded bg-gray-100 shrink-0 overflow-hidden border border-gray-200">
                     {(item.image_url || item.cover_image) ? (
                       <img src={item.image_url || item.cover_image} className="w-full h-full object-cover" />
@@ -131,11 +160,9 @@ export default function SettingsPage() {
                     )}
                   </div>
                   
-                  {/* 文本信息 */}
                   <div className="min-w-0 flex-1">
-                     <div className="font-bold text-gray-900 truncate">{item.name || item.title}</div>
-                     {/* 数据行 (左对齐) */}
-                     <div className="mt-0.5 text-xs">
+                      <div className="font-bold text-gray-900 truncate">{item.name || item.title}</div>
+                      <div className="mt-0.5 text-xs">
                         {type === 'recipe' ? (
                           <span className="text-gray-500">{new Date(item.created_at).toLocaleDateString()}</span>
                         ) : (
@@ -147,11 +174,10 @@ export default function SettingsPage() {
                              </span>
                           </div>
                         )}
-                     </div>
+                      </div>
                   </div>
                 </div>
 
-                {/* 右侧：操作 (固定宽) */}
                 <div className="w-16 flex justify-end gap-3 text-gray-400 shrink-0">
                   <button onClick={() => { if (type === 'recipe') router.push(`/recipes/${item.id}/edit`); else openEditModal(item, type) }} className="hover:text-blue-600 p-1"><Edit3 size={16}/></button>
                   <button onClick={() => { if (type === 'recipe') handleDeleteRecipe(item.id); else handleDeleteItem(item.id, type) }} className="hover:text-red-600 p-1"><Trash2 size={16}/></button>
@@ -174,7 +200,7 @@ export default function SettingsPage() {
         <div className="p-6">
           <h1 className="text-2xl font-bold mb-6 text-gray-900">数据库管理</h1>
 
-          {/* 顶部 Tabs */}
+          {/* Tabs */}
           <div className="flex gap-6 mb-6 border-b border-gray-100 overflow-x-auto no-scrollbar">
             {[ 
               { id: 'ingredients', label: '基础食材', icon: Carrot }, 
@@ -194,7 +220,7 @@ export default function SettingsPage() {
             ))}
           </div>
 
-          {/* 内容区域 */}
+          {/* List Content */}
           {(activeTab === 'ingredients' || activeTab === 'pantry' || activeTab === 'recipes') && (
             <div className="space-y-4">
               <div className="flex gap-2">
@@ -218,7 +244,7 @@ export default function SettingsPage() {
             </div>
           )}
 
-          {/* 标签管理 (保持不变) */}
+          {/* Tags Management */}
           {activeTab === 'tags' && (
             <div className="space-y-6">
               <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col md:flex-row gap-4 items-end">
@@ -264,7 +290,7 @@ export default function SettingsPage() {
         </div>
       </PageContainer>
 
-      {/* 编辑弹窗 */}
+      {/* Edit Modal */}
       {editingItem && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
            <div className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl animate-in zoom-in-95">
