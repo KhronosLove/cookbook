@@ -1,0 +1,71 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+@layer base {
+  /* 修复 iOS 输入框放大 */
+  @media (max-width: 640px) {
+    input, textarea, select {
+      font-size: 16px !important;
+      transform: scale(1);
+    }
+  }
+
+  body {
+    @apply bg-[#F9FAFB] text-slate-900 antialiased; /* 极淡的灰背景，深蓝灰文字 */
+  }
+}
+
+/* 可选优化：防止整个页面左右晃动
+   如果在手机上滑动时发现页面能左右晃动（露出白边），加上这个：
+*/
+html, body {
+  overflow-x: hidden;
+  position: relative; /* 辅助定位 */
+}
+
+
+
+
+/* 隐藏滚动条但保留功能 (可选) */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* 增加一个淡入动画 */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-enter {
+  animation: fadeIn 0.4s ease-out forwards;
+}
