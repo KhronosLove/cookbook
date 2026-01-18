@@ -29,8 +29,8 @@ export default function Navbar() {
   const mobileNavItems = [
     { name: '首页', href: '/', emoji: '🏠' },
     { name: '菜谱', href: '/recipes', emoji: '🍳' },
-    { name: '日记', href: '/diary', emoji: '🥗' },
-    { name: '统计', href: '/statistics', emoji: '📊' },
+    { name: '日记', href: '/diary', emoji: '📅' },
+    { name: '统计', href: '/statistics', emoji: '📈' },
   ]
 
   // 2. 电脑端左侧主要菜单
@@ -117,7 +117,7 @@ export default function Navbar() {
       <nav className="hidden sm:block sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-gray-100">
         <div className="max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">
           <Link href="/" className="text-xl font-black tracking-tighter">
-            K<span className="text-orange-500">.</span>Cookbook
+            🥕 Kyle's Cookbook
           </Link>
 
           <div className="flex items-center gap-8">
