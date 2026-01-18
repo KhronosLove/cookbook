@@ -2,71 +2,160 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Settings, User, BookOpen, Activity, BarChart2, ChefHat } from 'lucide-react'
+import { User, LogIn, Settings } from 'lucide-react' // 引入 Settings 图标
+import { useEffect, useState } from 'react'
+import { supabase } from '@/utils/supabase'
 
 export default function Navbar() {
   const pathname = usePathname()
+  const [user, setUser] = useState(null)
 
-  const navItems = [
-    { name: '菜谱', href: '/recipes', icon: BookOpen, isActive: pathname.startsWith('/recipes') },
-    { name: '日记', href: '/diary', icon: Activity, isActive: pathname.startsWith('/diary') },
-    { name: '统计', href: '/statistics', icon: BarChart2, isActive: pathname.startsWith('/statistics') },
+  // 登录状态检测
+  useEffect(() => {
+    const checkUser = async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      setUser(session?.user || null)
+    }
+    checkUser()
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user || null)
+    })
+
+    return () => subscription.unsubscribe()
+  }, [])
+
+  // 1. 移动端底部菜单
+  const mobileNavItems = [
+    { name: '首页', href: '/', emoji: '🏠' },
+    { name: '菜谱', href: '/recipes', emoji: '🍳' },
+    { name: '日记', href: '/diary', emoji: '🥗' },
+    { name: '统计', href: '/statistics', emoji: '📊' },
+  ]
+
+  // 2. 电脑端左侧主要菜单
+  const desktopNavItems = [
+    { name: '首页', href: '/' },
+    { name: '菜谱', href: '/recipes' },
+    { name: '日记', href: '/diary' },
+    { name: '统计', href: '/statistics' },
   ]
 
   return (
-    <nav className="fixed top-0 left-0 right-0 h-16 bg-white/90 backdrop-blur-md border-b border-gray-200 z-50">
-      {/* 核心修改：max-w-5xl (之前可能是 7xl)，px-4 sm:px-6 (与 PageContainer 保持一致) */}
-      <div className="max-w-5xl mx-auto h-full px-4 sm:px-6 flex items-center justify-between">
-        
-        {/* 左侧：Logo */}
-        <Link href="/" className="flex items-center gap-2 group shrink-0">
-          <div className="w-8 h-8 bg-black text-white rounded-lg flex items-center justify-center shadow-md group-hover:scale-105 transition-transform">
-            <ChefHat size={18} />
-          </div>
-          <span className="font-bold text-gray-900 text-sm sm:text-lg tracking-tight">
-            Kyle's Cookbook
-          </span>
+    <>
+      {/* ==============================
+          1. 移动端：顶部导航栏
+          ============================== */}
+      <div className="fixed top-0 left-0 right-0 h-14 bg-white/90 backdrop-blur-md border-b border-gray-100 z-50 flex items-center justify-between px-4 sm:hidden">
+        {/* 左侧：标题 */}
+        <Link href="/" className="font-black text-lg tracking-tight active:opacity-70 transition-opacity">
+          🥕 Kyle's Cookbook
         </Link>
 
-        {/* 右侧：导航 + 功能图标 */}
-        <div className="flex items-center gap-1 sm:gap-4">
-          
-          {/* 1. 核心导航 */}
-          <div className="flex items-center bg-gray-100/50 p-0.5 sm:p-1 rounded-full border border-gray-100">
-            {navItems.map((item) => (
-              <Link 
-                key={item.name}
-                href={item.href}
-                className={`
-                  flex items-center gap-1.5 rounded-full font-bold transition-all
-                  px-2.5 py-1 text-xs sm:px-3 sm:py-1.5 sm:text-sm
-                  ${item.isActive 
-                    ? 'bg-white text-black shadow-sm ring-1 ring-black/5' 
-                    : 'text-gray-500 hover:text-gray-900 hover:bg-gray-200/50'
-                  }
-                `}
-              >
-                <item.icon size={16} strokeWidth={2.5}/>
-                <span className={`hidden sm:inline ${item.isActive ? 'inline' : ''}`}>{item.name}</span>
-              </Link>
-            ))}
-          </div>
-
-          <div className="w-px h-4 bg-gray-200 mx-0.5 sm:mx-0"></div>
-
-          {/* 2. 设置 & 用户 */}
-          <div className="flex items-center gap-0 sm:gap-1">
-            <Link href="/settings" className="p-1.5 sm:p-2 text-gray-400 hover:text-slate-900 hover:bg-gray-100 rounded-full transition-all" title="数据库管理">
-              <Settings className="w-[18px] h-[18px] sm:w-5 sm:h-5" strokeWidth={2} />
+        {/* 右侧：功能区 (设置 + 个人中心) */}
+        <div className="flex items-center gap-2">
+          {/* 仅在已登录时显示设置按钮 */}
+          {user && (
+            <Link 
+              href="/settings"
+              className={`p-2 rounded-full transition-colors ${
+                pathname === '/settings' ? 'bg-black text-white' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              <Settings size={20} />
             </Link>
-            
-            <Link href="/profile" className="p-1.5 sm:p-2 text-gray-400 hover:text-slate-900 hover:bg-gray-100 rounded-full transition-all" title="用户管理">
-              <User className="w-[18px] h-[18px] sm:w-5 sm:h-5" strokeWidth={2} />
-            </Link>
-          </div>
+          )}
 
+          {/* 登录/个人中心 */}
+          <Link 
+            href={user ? '/profile' : '/login'}
+            className={`p-2 rounded-full transition-colors ${
+              pathname === '/profile' ? 'bg-black text-white' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+            }`}
+          >
+            {user ? <User size={20} /> : <LogIn size={20} />}
+          </Link>
         </div>
       </div>
-    </nav>
+
+      {/* 顶部占位 */}
+      <div className="h-14 sm:hidden"></div>
+
+
+      {/* ==============================
+          2. 移动端：底部导航栏
+          ============================== */}
+      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 pb-safe sm:hidden z-50 safe-area-bottom">
+        <div className="flex justify-around items-center h-16">
+          {mobileNavItems.map((item) => {
+            const isActive = pathname === item.href
+            
+            return (
+              <Link 
+                key={item.href} 
+                href={item.href} 
+                className="flex-1 h-full flex flex-col items-center justify-center gap-1 active:scale-95 transition-transform"
+              >
+                <span className="text-2xl leading-none filter drop-shadow-sm">
+                  {item.emoji}
+                </span>
+                <span className={`text-[10px] font-bold transition-colors ${
+                  isActive ? 'text-black' : 'text-gray-400'
+                }`}>
+                  {item.name}
+                </span>
+              </Link>
+            )
+          })}
+        </div>
+      </nav>
+
+
+      {/* ==============================
+          3. 电脑端：顶部导航栏
+          ============================== */}
+      <nav className="hidden sm:block sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-gray-100">
+        <div className="max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">
+          <Link href="/" className="text-xl font-black tracking-tighter">
+            K<span className="text-orange-500">.</span>Cookbook
+          </Link>
+
+          <div className="flex items-center gap-8">
+            {desktopNavItems.map((item) => (
+               <Link 
+                  key={item.href} 
+                  href={item.href} 
+                  className={`text-sm font-bold transition-colors ${
+                    pathname === item.href ? 'text-black' : 'text-gray-400 hover:text-black'
+                  }`}
+                >
+                  {item.name}
+               </Link>
+            ))}
+            
+            {/* 倒数第二个位置：仅在登录后显示的“设置”按钮 */}
+            {user && (
+              <Link 
+                href="/settings" 
+                className={`text-sm font-bold transition-colors ${
+                  pathname === '/settings' ? 'text-black' : 'text-gray-400 hover:text-black'
+                }`}
+              >
+                设置
+              </Link>
+            )}
+
+            {/* 最后一个位置：登录/我的 */}
+            <Link 
+              href={user ? '/profile' : '/login'} 
+              className="bg-black text-white px-5 py-2 rounded-full text-sm font-bold hover:bg-gray-800 transition-all flex items-center gap-2"
+            >
+               {user ? <User size={16}/> : <LogIn size={16}/>}
+               <span>{user ? '我的' : '登录'}</span>
+            </Link>
+          </div>
+        </div>
+      </nav>
+    </>
   )
 }

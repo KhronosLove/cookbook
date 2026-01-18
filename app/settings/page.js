@@ -37,18 +37,23 @@ export default function SettingsPage() {
   const fetchIngredients = async () => { const { data } = await supabase.from('ingredients_library').select('*').order('name'); setIngredients(data || []) }
   const fetchProducts = async () => { const { data } = await supabase.from('products_library').select('*').order('name'); setProducts(data || []) }
 
-  // --- 修复重点：添加标签时获取 user_id ---
+// --- 修复重点：添加标签时获取 user_id ---
   const handleAddTag = async () => { 
     if (!newTagName) return; 
     
     // 1. 获取当前用户
     const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
+    
+    // 如果用户没登录，给个提示
+    if (!user) {
+      alert('请先登录！')
+      return
+    }
 
     // 2. 插入时带上 user_id
     const { error } = await supabase.from('defined_tags').insert([{ 
-      user_id: user.id, // <--- 这里是关键
-      category: newTagCat, 
+      user_id: user.id, // 必填
+      category: newTagCat || '未分类', // 防止分类为空
       name: newTagName 
     }]); 
 
@@ -56,8 +61,9 @@ export default function SettingsPage() {
       setNewTagName(''); 
       fetchTags() 
     } else {
-      console.error(error)
-      alert('添加失败，请重试')
+      // ⚠️ 关键：把错误信息弹出来，这样我们就知道是 permission denied 还是 column missing
+      console.error('Add Tag Error:', error)
+      alert(`添加失败: ${error.message}`) 
     }
   }
 
