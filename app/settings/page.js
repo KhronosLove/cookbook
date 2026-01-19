@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/utils/supabase'
 import { useRouter } from 'next/navigation' 
-import { Trash2, Plus, Tag, Edit3, Search, Save, X, Calculator, Camera, Package, Carrot, Book } from 'lucide-react'
+import { Trash2, Plus, Tag, Edit3, Search, Save, X, Calculator, Camera, Package, Carrot, Book, ArrowUp, ArrowDown, Pencil } from 'lucide-react'
 import Navbar from '@/components/Navbar'
 import PageContainer from '@/components/PageContainer'
 
@@ -21,6 +21,7 @@ export default function SettingsPage() {
   const [newTagCat, setNewTagCat] = useState('菜系')
   const [newTagName, setNewTagName] = useState('')
   
+  // 编辑/新增 Modal 状态
   const [editingItem, setEditingItem] = useState(null)
   const [modalType, setModalType] = useState('ingredient')
   const [formData, setFormData] = useState({ name: '', calories: 0, protein: 0, fat: 0, carbs: 0, image_url: '' })
@@ -32,45 +33,199 @@ export default function SettingsPage() {
     fetchTags(); fetchRecipes(); fetchIngredients(); fetchProducts(); 
   }, [])
 
-  const fetchTags = async () => { const { data } = await supabase.from('defined_tags').select('*').order('category'); setTags(data || []) }
+  // --- 获取数据 (增加排序逻辑) ---
+  const fetchTags = async () => { 
+    // 按照 category_rank (大类顺序) -> tag_rank (内部顺序) -> id 排序
+    const { data } = await supabase
+      .from('defined_tags')
+      .select('*')
+      .order('category_rank', { ascending: true })
+      .order('tag_rank', { ascending: true })
+      .order('id', { ascending: true }); 
+    setTags(data || []) 
+  }
   const fetchRecipes = async () => { const { data } = await supabase.from('recipes').select('id, title, created_at, cover_image').order('created_at', { ascending: false }); setRecipes(data || []) }
   const fetchIngredients = async () => { const { data } = await supabase.from('ingredients_library').select('*').order('name'); setIngredients(data || []) }
   const fetchProducts = async () => { const { data } = await supabase.from('products_library').select('*').order('name'); setProducts(data || []) }
 
-// --- 修复重点：添加标签时获取 user_id ---
+  // --- 标签新增 ---
   const handleAddTag = async () => { 
     if (!newTagName) return; 
-    
-    // 1. 获取当前用户
     const { data: { user } } = await supabase.auth.getUser()
-    
-    // 如果用户没登录，给个提示
-    if (!user) {
-      alert('请先登录！')
-      return
-    }
+    if (!user) { alert('请先登录！'); return }
 
-    // 2. 插入时带上 user_id
+    // 获取当前该分类下最大的 tag_rank，以确保新标签在最后
+    const currentCatTags = tags.filter(t => t.category === newTagCat);
+    const maxRank = currentCatTags.length > 0 ? Math.max(...currentCatTags.map(t => t.tag_rank || 0)) : 0;
+    
+    // 获取该分类的 rank (如果已存在)
+    const existingCat = tags.find(t => t.category === newTagCat);
+    const catRank = existingCat ? existingCat.category_rank : (tags.length > 0 ? Math.max(...tags.map(t => t.category_rank || 0)) + 1 : 0);
+
     const { error } = await supabase.from('defined_tags').insert([{ 
-      user_id: user.id, // 必填
-      category: newTagCat || '未分类', // 防止分类为空
-      name: newTagName 
+      user_id: user.id, 
+      category: newTagCat || '未分类', 
+      name: newTagName,
+      tag_rank: maxRank + 1,
+      category_rank: catRank
     }]); 
 
     if (!error) { 
       setNewTagName(''); 
       fetchTags() 
     } else {
-      // ⚠️ 关键：把错误信息弹出来，这样我们就知道是 permission denied 还是 column missing
       console.error('Add Tag Error:', error)
       alert(`添加失败: ${error.message}`) 
     }
   }
 
+  // --- 标签 & 分类 操作逻辑 (核心修改) ---
+
+  // 1. 删除
   const handleDeleteTag = async (id) => { if(!confirm('删除标签?')) return; await supabase.from('defined_tags').delete().eq('id', id); fetchTags() }
   const handleDeleteRecipe = async (id) => { if(!confirm('删除菜谱?')) return; await supabase.from('recipes').delete().eq('id', id); fetchRecipes() }
   const handleDeleteItem = async (id, type) => { if(!confirm('删除?')) return; await supabase.from(type === 'ingredient' ? 'ingredients_library' : 'products_library').delete().eq('id', id); type === 'ingredient' ? fetchIngredients() : fetchProducts() }
 
+// --- 2. 移动标签 (智能修复版) ---
+  const moveTag = async (tag, direction) => {
+    const siblings = tags.filter(t => t.category === tag.category);
+    const currentIndex = siblings.findIndex(t => t.id === tag.id);
+    if (currentIndex === -1) return;
+
+    const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+    if (targetIndex < 0 || targetIndex >= siblings.length) return;
+
+    // 获取两个要交换的对象
+    const itemA = siblings[currentIndex]; // 当前点击的
+    const itemB = siblings[targetIndex];  // 目标位置的
+
+    // --- 核心修复逻辑 ---
+    // 获取它俩当前的 Rank
+    let rankA = itemA.tag_rank || 0;
+    let rankB = itemB.tag_rank || 0;
+
+    // ⚠️ 关键检查：如果两个 Rank 一样，或者顺序反了（比如上面比下面大），强制修复
+    if (rankA === rankB) {
+      // 如果相等，人为制造差异
+      rankA = rankB + 1; 
+    }
+    
+    // 确保我们手里有两个不同的 Rank 值
+    // 较小的值应该给位置靠上的 (index 小的)
+    // 较大的值应该给位置靠下的 (index 大的)
+    const minRank = Math.min(rankA, rankB);
+    const maxRank = Math.max(rankA, rankB);
+    
+    // 确定谁去上，谁去下
+    const upperItemIndex = Math.min(currentIndex, targetIndex);
+    // 如果 currentIndex 是较小的，说明当前项要往上走(或者本身就在上)，不对，direction决定方向
+    // 简单来说：交换后，去 targetIndex 的那个拿到 itemB 的 Rank，反之亦然
+    
+    // 乐观更新：在前端数组中直接交换位置
+    const newTags = [...tags];
+    const globalIdxA = newTags.findIndex(t => t.id === itemA.id);
+    const globalIdxB = newTags.findIndex(t => t.id === itemB.id);
+    
+    // 交换 Rank 值：
+    // 既然我们要交换位置，我们就把 itemB 的 Rank 给 itemA，把 itemA 的 Rank 给 itemB
+    // 但是为了解决相等的问题，我们使用刚才计算出的 min/max
+    // 现在的逻辑是：交换位置 = 交换 Rank。
+    // 如果 itemA 往下移 (Up -> Down)，它应该拿较大的 Rank
+    // 如果 itemA 往上移 (Down -> Up)，它应该拿较小的 Rank
+    
+    let newRankA, newRankB;
+
+    if (direction === 'up') {
+        // A 往上 (变小)，B 往下 (变大)
+        newRankA = minRank; 
+        newRankB = maxRank; 
+        // 再次兜底：如果算出来还是相等(比如原始数据太乱)，强制 B = A + 1
+        if (newRankA === newRankB) newRankB = newRankA + 1;
+    } else {
+        // A 往下 (变大)，B 往上 (变小)
+        newRankA = maxRank;
+        newRankB = minRank;
+        if (newRankA === newRankB) newRankA = newRankB + 1;
+    }
+
+    // 更新内存数据
+    newTags[globalIdxA].tag_rank = newRankA;
+    newTags[globalIdxB].tag_rank = newRankB;
+    
+    // 排序并刷新界面
+    setTags(newTags.sort((a,b) => a.category_rank - b.category_rank || a.tag_rank - b.tag_rank));
+
+    // 提交数据库
+    await supabase.from('defined_tags').update({ tag_rank: newRankA }).eq('id', itemA.id);
+    await supabase.from('defined_tags').update({ tag_rank: newRankB }).eq('id', itemB.id);
+  }
+
+  // --- 3. 移动分类 (智能修复版) ---
+  const moveCategory = async (categoryName, direction) => {
+    const uniqueCategories = [...new Set(tags.map(t => t.category))];
+    const currentIndex = uniqueCategories.indexOf(categoryName);
+    if (currentIndex === -1) return;
+
+    const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+    if (targetIndex < 0 || targetIndex >= uniqueCategories.length) return;
+
+    const targetCategoryName = uniqueCategories[targetIndex];
+    
+    // 获取两个分类当前的 Rank 值
+    let currentRank = tags.find(t => t.category === categoryName)?.category_rank || 0;
+    let targetRank = tags.find(t => t.category === targetCategoryName)?.category_rank || 0;
+
+    // --- 智能修复分类 Rank ---
+    if (currentRank === targetRank) {
+        currentRank = targetRank + 1;
+    }
+    const minRank = Math.min(currentRank, targetRank);
+    const maxRank = Math.max(currentRank, targetRank);
+
+    let newCurrentRank, newTargetRank;
+    
+    if (direction === 'up') {
+        newCurrentRank = minRank;
+        newTargetRank = maxRank;
+        if (newCurrentRank === newTargetRank) newTargetRank = newCurrentRank + 1;
+    } else {
+        newCurrentRank = maxRank;
+        newTargetRank = minRank;
+        if (newCurrentRank === newTargetRank) newCurrentRank = newTargetRank + 1;
+    }
+
+    // 更新前端
+    const newTags = tags.map(t => {
+      if (t.category === categoryName) return { ...t, category_rank: newCurrentRank };
+      if (t.category === targetCategoryName) return { ...t, category_rank: newTargetRank };
+      return t;
+    });
+    setTags(newTags.sort((a,b) => a.category_rank - b.category_rank || a.tag_rank - b.tag_rank));
+
+    // 更新数据库
+    await supabase.from('defined_tags').update({ category_rank: newCurrentRank }).eq('category', categoryName);
+    await supabase.from('defined_tags').update({ category_rank: newTargetRank }).eq('category', targetCategoryName);
+  }
+
+  // 4. 重命名 (标签或分类)
+  const handleRename = async (type, originalName, id = null) => {
+    const newName = prompt(`请输入新的${type === 'category' ? '分类' : '标签'}名称:`, originalName);
+    if (!newName || newName === originalName) return;
+
+    if (type === 'category') {
+      // 批量修改分类名
+      const { error } = await supabase.from('defined_tags').update({ category: newName }).eq('category', originalName);
+      if (error) alert('修改失败');
+    } else {
+      // 修改单个标签名
+      const { error } = await supabase.from('defined_tags').update({ name: newName }).eq('id', id);
+      if (error) alert('修改失败');
+    }
+    fetchTags();
+  }
+
+
+  // --- 通用表单逻辑 ---
   const handleAddClick = () => { if (activeTab === 'recipes') { router.push('/recipes/new') } else { openEditModal(null, activeTab === 'ingredients' ? 'ingredient' : 'product') } }
   const openEditModal = (item, type) => { setEditingItem(item || {}); setModalType(type); if (item) { setFormData({ name: item.name, calories: item.calories || 0, protein: item.protein || 0, fat: item.fat || 0, carbs: item.carbs || 0, image_url: item.image_url || '' }) } else { setFormData({ name: '', calories: 0, protein: 0, fat: 0, carbs: 0, image_url: '' }) } }
   const handleFormChange = (field, value) => { const newData = { ...formData, [field]: value }; if (['protein', 'fat', 'carbs'].includes(field)) { newData.calories = (parseFloat(newData.protein || 0) * 4) + (parseFloat(newData.carbs || 0) * 4) + (parseFloat(newData.fat || 0) * 9) }; setFormData(newData) }
@@ -199,6 +354,17 @@ export default function SettingsPage() {
     )
   }
 
+  // --- 组织 Tags 数据结构 (为了渲染分类) ---
+  // 将 flat 数组转换为按照 category 分组的结构
+  // 注意：因为 fetchTags 已经按照 category_rank 排序了，这里 reduce 会保持顺序
+  const groupedTags = tags.reduce((acc, t) => { 
+    if (!acc[t.category]) acc[t.category] = []; 
+    acc[t.category].push(t); 
+    return acc; 
+  }, {});
+
+  const categoryKeys = Object.keys(groupedTags);
+
   return (
     <>
       <Navbar />
@@ -253,6 +419,7 @@ export default function SettingsPage() {
           {/* Tags Management */}
           {activeTab === 'tags' && (
             <div className="space-y-6">
+              {/* 新增标签表单 */}
               <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col md:flex-row gap-4 items-end">
                 <div className="flex-1 w-full">
                   <label className="text-xs text-gray-500 block mb-1">分类名称</label>
@@ -276,15 +443,40 @@ export default function SettingsPage() {
                   <Plus size={20}/>
                 </button>
               </div>
+
+              {/* 标签列表区 (含排序和编辑功能) */}
               <div className="space-y-4">
-                {Object.entries(tags.reduce((acc, t) => { (acc[t.category] = acc[t.category] || []).push(t); return acc; }, {})).map(([cat, list]) => (
+                {categoryKeys.map((cat, catIdx) => (
                   <div key={cat} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-                    <h3 className="font-bold text-sm mb-3 flex items-center gap-2 text-gray-700"><Tag size={14}/> {cat}</h3>
-                    <div className="flex flex-wrap gap-2">
-                      {list.map(t => (
-                        <div key={t.id} className="bg-gray-50 text-xs px-2.5 py-1.5 rounded-md flex items-center gap-1 border border-gray-200 text-gray-600">
-                          {t.name}
-                          <button onClick={() => handleDeleteTag(t.id)} className="text-gray-400 hover:text-red-500 ml-1"><Trash2 size={12}/></button>
+                    
+                    {/* 分类标题栏 */}
+                    <div className="flex justify-between items-center mb-3 border-b border-gray-50 pb-2">
+                       <h3 className="font-bold text-sm flex items-center gap-2 text-gray-700">
+                         <Tag size={14}/> {cat}
+                       </h3>
+                       <div className="flex items-center gap-1">
+                          {/* 分类编辑/移动按钮 */}
+                          <button onClick={() => handleRename('category', cat)} className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-blue-600" title="重命名分类"><Pencil size={12}/></button>
+                          <div className="w-[1px] h-3 bg-gray-200 mx-1"></div>
+                          <button onClick={() => moveCategory(cat, 'up')} disabled={catIdx === 0} className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-black disabled:opacity-30"><ArrowUp size={12}/></button>
+                          <button onClick={() => moveCategory(cat, 'down')} disabled={catIdx === categoryKeys.length - 1} className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-black disabled:opacity-30"><ArrowDown size={12}/></button>
+                       </div>
+                    </div>
+
+                    {/* 标签内容 */}
+                    <div className="flex flex-col gap-2">
+                      {groupedTags[cat].map((t, tagIdx) => (
+                        <div key={t.id} className="bg-gray-50 text-sm px-3 py-2 rounded-lg flex items-center justify-between border border-gray-100">
+                          <span className="text-gray-700 font-medium">{t.name}</span>
+                          
+                          <div className="flex items-center gap-1">
+                            {/* 标签移动/编辑/删除 */}
+                            <button onClick={() => handleRename('tag', t.name, t.id)} className="p-1.5 hover:bg-gray-200 rounded text-gray-400 hover:text-blue-600"><Pencil size={12}/></button>
+                            <button onClick={() => moveTag(t, 'up')} disabled={tagIdx === 0} className="p-1.5 hover:bg-gray-200 rounded text-gray-400 hover:text-black disabled:opacity-30"><ArrowUp size={12}/></button>
+                            <button onClick={() => moveTag(t, 'down')} disabled={tagIdx === groupedTags[cat].length - 1} className="p-1.5 hover:bg-gray-200 rounded text-gray-400 hover:text-black disabled:opacity-30"><ArrowDown size={12}/></button>
+                            <div className="w-[1px] h-3 bg-gray-300 mx-1"></div>
+                            <button onClick={() => handleDeleteTag(t.id)} className="p-1.5 hover:bg-red-50 rounded text-gray-400 hover:text-red-500"><Trash2 size={12}/></button>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -296,7 +488,7 @@ export default function SettingsPage() {
         </div>
       </PageContainer>
 
-      {/* Edit Modal */}
+      {/* Edit Modal (保持原样) */}
       {editingItem && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
            <div className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl animate-in zoom-in-95">

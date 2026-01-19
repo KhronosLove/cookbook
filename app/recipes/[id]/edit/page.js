@@ -28,7 +28,13 @@ export default function EditRecipe() {
 
   useEffect(() => {
     const initData = async () => {
-      const { data: tagsData } = await supabase.from('defined_tags').select('*')
+      const { data } = await supabase
+        .from('defined_tags')
+        .select('*')
+        // 加上这两行核心排序逻辑
+        .order('category_rank', { ascending: true }) // 先排大类
+        .order('tag_rank', { ascending: true })      // 再排小标签
+        .order('id', { ascending: true });           // 最后用ID兜底
       if (tagsData) {
         const grouped = tagsData.reduce((acc, curr) => {
           if (!acc[curr.category]) acc[curr.category] = []
