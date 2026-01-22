@@ -141,7 +141,7 @@ export default function RecipeList() {
                 <span className="text-xs font-bold text-gray-400 w-10 shrink-0">{category}</span>
                 <div className="flex gap-2">
                   <button onClick={() => setFilters({ ...filters, [category]: '全部' })} className={`text-xs px-3 py-1.5 rounded-lg font-medium whitespace-nowrap transition-colors ${filters[category] === '全部' ? 'bg-black/5 text-black font-bold' : 'text-gray-500 hover:bg-gray-100'}`}>全部</button>
-                  {tags.map(tag => (
+                  {[...new Set(tags)].map(tag => (
                     <button key={tag} onClick={() => setFilters({ ...filters, [category]: tag })} className={`text-xs px-3 py-1.5 rounded-lg font-medium whitespace-nowrap transition-colors ${filters[category] === tag ? 'bg-orange-100 text-orange-700 font-bold' : 'text-gray-500 hover:bg-gray-100 hover:text-gray-900'}`}>{tag}</button>
                   ))}
                 </div>

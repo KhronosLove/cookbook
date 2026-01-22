@@ -19,7 +19,7 @@ export default function Home() {
       href: '/diary',
       title: '饮食日记',
       en: 'Diet Diary',
-      desc: '追踪每日热量与宏量营养素，保持健康的饮食习惯，还能早日成为大肌霸。',
+      desc: '追踪每日热量与宏量营养素，养成健康的饮食习惯，还能早日大肌霸。',
       icon: Activity,
       color: 'bg-indigo-50 text-indigo-600',
       border: 'hover:border-indigo-200',

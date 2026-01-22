@@ -7,7 +7,7 @@ import { ChevronLeft, ChevronRight, Plus, Search, X, Camera, Trash2, Settings2, 
 import Navbar from '@/components/Navbar'
 import PageContainer from '@/components/PageContainer'
 
-// ... (COLORS, MEAL_CONFIG, UNIT_OPTIONS 常量保持不变，无需重复粘贴) ...
+// ... (COLORS, MEAL_CONFIG, UNIT_OPTIONS 保持不变) ...
 const COLORS = {
   carbs: { label: '碳水', bg: 'bg-indigo-50', text: 'text-indigo-600', bar: 'bg-indigo-500', border: 'focus:border-indigo-500' },
   protein: { label: '蛋白质', bg: 'bg-amber-50', text: 'text-amber-600', bar: 'bg-amber-500', border: 'focus:border-amber-500' },
@@ -23,14 +23,15 @@ const MEAL_CONFIG = {
 
 const UNIT_OPTIONS = [
   { value: 'g', label: '克 (g)', defaultWeight: 1 },
+  { value: 'ml', label: '毫升 (ml)', defaultWeight: 1 },
   { value: 'pkg', label: '包/袋', defaultWeight: 100 },
-  { value: 'box', label: '盒', defaultWeight: 250 },
-  { value: 'bowl', label: '碗', defaultWeight: 300 },
-  { value: 'cup', label: '杯', defaultWeight: 250 },
+  //{ value: 'box', label: '盒', defaultWeight: 250 },
+  //{ value: 'bowl', label: '碗', defaultWeight: 300 },
+  //{ value: 'cup', label: '杯', defaultWeight: 250 },
   { value: 'serving', label: '份', defaultWeight: 100 },
-  { value: 'piece', label: '个/只', defaultWeight: 50 },
-  { value: 'slice', label: '片', defaultWeight: 30 },
-  { value: 'scoop', label: '勺', defaultWeight: 15 },
+  //{ value: 'piece', label: '个/只', defaultWeight: 50 },
+  //{ value: 'slice', label: '片', defaultWeight: 30 },
+  //{ value: 'scoop', label: '勺', defaultWeight: 15 },
 ]
 
 export default function Diary() {
@@ -72,7 +73,7 @@ export default function Diary() {
     if (saved) try { setHistory(JSON.parse(saved)) } catch (e) {}
   }, [])
   
-  // [注意] Custom模式下自动计算热量逻辑
+  // Custom模式下自动计算热量 (依然适用：1g碳水=4kcal，不管这1g是在100g里还是1份里)
   useEffect(() => {
     if (mode === 'custom') {
       const p = parseFloat(formItem.protein) || 0
@@ -132,6 +133,8 @@ export default function Diary() {
   const handleSelectSearchResult = async (item, type) => {
     saveToHistory(item, type)
     let density = { cal: item.calories || 0, p: item.protein || 0, f: item.fat || 0, c: item.carbs || 0 }
+    
+    // 如果是菜谱，需要根据配料表反推总热量密度
     if (type === 'recipe') {
       const { data: items } = await supabase.from('recipe_items').select('amount_g, ingredients_library(calories, protein, fat, carbs)').eq('recipe_id', item.id)
       if (items && items.length > 0) {
@@ -139,13 +142,28 @@ export default function Diary() {
         items.forEach(i => {
           const w = i.amount_g || 0; totalWeight += w
           if (i.ingredients_library) {
-            const ratio = w / 100; totalNutri.cal += (i.ingredients_library.calories||0)*ratio; totalNutri.p += (i.ingredients_library.protein||0)*ratio; totalNutri.f += (i.ingredients_library.fat||0)*ratio; totalNutri.c += (i.ingredients_library.carbs||0)*ratio
+            const ratio = w / 100; 
+            totalNutri.cal += (i.ingredients_library.calories||0)*ratio; 
+            totalNutri.p += (i.ingredients_library.protein||0)*ratio; 
+            totalNutri.f += (i.ingredients_library.fat||0)*ratio; 
+            totalNutri.c += (i.ingredients_library.carbs||0)*ratio
           }
         })
-        if (totalWeight > 0) { const factor = 100 / totalWeight; density = { cal: totalNutri.cal * factor, p: totalNutri.p * factor, f: totalNutri.f * factor, c: totalNutri.c * factor } }
+        if (totalWeight > 0) { 
+            const factor = 100 / totalWeight; 
+            density = { cal: totalNutri.cal * factor, p: totalNutri.p * factor, f: totalNutri.f * factor, c: totalNutri.c * factor } 
+        }
       }
     }
-    setFormItem({ id: null, name: item.title || item.name, image_url: item.cover_image || item.image_url || '', amount: 100, unit: 'g', unitWeight: 1, calories: density.cal, protein: density.p, fat: density.f, carbs: density.c, density: density, type: type })
+
+    setFormItem({ 
+        id: null, name: item.title || item.name, image_url: item.cover_image || item.image_url || '', 
+        amount: 100, 
+        unit: 'g', unitWeight: 1, 
+        calories: density.cal, protein: density.p, fat: density.f, carbs: density.c, 
+        density: density, // 搜索结果通常是标准化的，保留密度方便 g 单位计算
+        type: type 
+    })
     setSearch(''); setMode('detail')
   }
 
@@ -161,37 +179,57 @@ export default function Diary() {
 
   const handleSaveGoal = async () => {
     const { data: { user } } = await supabase.auth.getUser()
+
+    
     const { error } = await supabase.from('daily_goals').upsert({ user_id: user.id, apply_date: date, target_protein: tempGoals.p, target_fat: tempGoals.f, target_carbs: tempGoals.c }, { onConflict: 'user_id, apply_date' })
     if (!error) { setGoals(tempGoals); setShowGoalModal(false) }
   }
 
-  // --- Save Logic (通用) ---
+  // --- [核心修改] Save Logic ---
   const handleSave = async () => {
     const { data: { user } } = await supabase.auth.getUser()
-    // 计算总克数
-    const totalGrams = parseFloat(formItem.amount) * parseFloat(formItem.unitWeight)
+    
+    // 计算总克数 (用于 amount_g 字段，方便数据库统一存储重量)
+    const quantity = parseFloat(formItem.amount) || 0
+    const totalGrams = quantity * parseFloat(formItem.unitWeight)
 
-    let payload = { user_id: user.id, log_date: date, meal_type: mealType, food_name: formItem.name, image_url: formItem.image_url, amount_g: totalGrams }
+    let payload = { 
+        user_id: user.id, log_date: date, meal_type: mealType, 
+        food_name: formItem.name, image_url: formItem.image_url, 
+        amount_g: totalGrams 
+    }
 
-    // 如果是自定义，先存入库
+    // 保存到自定义库
     if (mode === 'custom') {
       await supabase.from('products_library').insert([{
         user_id: user.id, name: formItem.name, image_url: formItem.image_url,
-        calories: formItem.calories, protein: formItem.protein, fat: formItem.fat, carbs: formItem.carbs
+        calories: formItem.calories, protein: formItem.protein, fat: formItem.fat, carbs: formItem.carbs,
+        unit: formItem.unit // 保存单位
       }])
     }
 
-    // 计算实际摄入 (注意 Custom 模式下 density 可能是空的，要用 calories 兜底)
-    const ratio = totalGrams / 100
+    // [逻辑修正] 计算摄入量
+    let finalRatio = 0
+    
+    // 基础数值 (来自 density 或者 直接输入)
     const baseCal = formItem.density?.cal || formItem.calories
     const baseP = formItem.density?.p || formItem.protein
     const baseF = formItem.density?.f || formItem.fat
     const baseC = formItem.density?.c || formItem.carbs
 
-    payload.intake_calories = baseCal * ratio
-    payload.intake_protein = baseP * ratio
-    payload.intake_fat = baseF * ratio
-    payload.intake_carbs = baseC * ratio
+    if (formItem.unit === 'g' || formItem.unit === 'ml') {
+        // 如果单位是克/毫升，输入的是密度 (每100g)，所以需要除以100
+        finalRatio = quantity / 100
+    } else {
+        // [关键] 如果单位是份/包/个，输入的就是“单份”数值，直接乘以数量即可
+        // 比如：1份含200卡，吃了2份 -> 200 * 2
+        finalRatio = quantity
+    }
+
+    payload.intake_calories = baseCal * finalRatio
+    payload.intake_protein = baseP * finalRatio
+    payload.intake_fat = baseF * finalRatio
+    payload.intake_carbs = baseC * finalRatio
 
     if (mode === 'edit') await supabase.from('daily_logs').update(payload).eq('id', formItem.id)
     else await supabase.from('daily_logs').insert([payload])
@@ -205,26 +243,42 @@ export default function Diary() {
   const openEditModal = (log) => {
     setMealType(log.meal_type); setMode('edit')
     const amount = log.amount_g || 100
-    // 反推密度
+    
+    // 反推逻辑稍微复杂一点，因为存的是总数
+    // 这里简单反推回 100g 密度用于显示，或者你可以根据 saved unit 优化
+    // 为了简单，编辑时我们通常回到 'g' 模式
     const density = { cal: (log.intake_calories/amount)*100, p: (log.intake_protein/amount)*100, f: (log.intake_fat/amount)*100, c: (log.intake_carbs/amount)*100 }
-    setFormItem({ id: log.id, name: log.food_name, image_url: log.image_url, amount: amount, unit: 'g', unitWeight: 1, calories: density.cal, protein: density.p, fat: density.f, carbs: density.c, density: density, type: 'unknown' })
+    
+    setFormItem({ 
+        id: log.id, name: log.food_name, image_url: log.image_url, 
+        amount: amount, 
+        unit: 'g', unitWeight: 1, // 编辑模式暂时重置为克，这是最稳妥的
+        calories: density.cal, protein: density.p, fat: density.f, carbs: density.c, 
+        density: density, type: 'unknown' 
+    })
     setShowModal(true)
   }
 
   const closeModal = () => { setShowModal(false); setMode('search'); setSearch(''); setFormItem({ id:null, name:'', image_url:'', amount:100, unit:'g', unitWeight:1, calories:0, protein:0, fat:0, carbs:0, density:{}, type:'ingredient' }) }
 
-  // 预览逻辑
+  // [修改] 预览逻辑：同步 handleSave 的逻辑
   const preview = (() => {
-    const totalGrams = (parseFloat(formItem.amount) || 0) * (parseFloat(formItem.unitWeight) || 1)
-    const ratio = totalGrams / 100
-    const calBase = formItem.density?.cal || formItem.calories
-    return { cal: calBase * ratio }
+    const quantity = parseFloat(formItem.amount) || 0
+    const baseCal = formItem.density?.cal || formItem.calories
+    
+    if (formItem.unit === 'g' || formItem.unit === 'ml') {
+        return { cal: baseCal * (quantity / 100) }
+    } else {
+        // 如果是份，直接乘数量
+        return { cal: baseCal * quantity }
+    }
   })()
 
   // 单位切换
   const handleUnitChange = (e) => {
     const selectedUnit = e.target.value
     const config = UNIT_OPTIONS.find(u => u.value === selectedUnit)
+    // 切换单位时，重置数量为1，克重为默认值
     setFormItem(prev => ({ ...prev, unit: selectedUnit, unitWeight: config ? config.defaultWeight : 1, amount: 1 }))
   }
 
@@ -371,7 +425,38 @@ export default function Diary() {
                    {search && (
                      <div className="space-y-6 text-left animate-in fade-in slide-in-from-bottom-2">
                         {searchResults.recipes.length > 0 && (<div><h4 className="text-xs font-bold text-slate-400 uppercase mb-3 pl-1">我的菜谱</h4><div className="space-y-2">{searchResults.recipes.map(r=>(<button key={r.id} onClick={()=>handleSelectSearchResult(r,'recipe')} className="w-full p-3 bg-white border border-slate-100 rounded-xl flex items-center gap-4 hover:border-black transition-all group"><div className="w-12 h-12 bg-slate-100 rounded-lg bg-cover bg-center shrink-0" style={{backgroundImage:`url(${r.cover_image})`}}></div><div className="text-left"><div className="font-bold text-slate-900 group-hover:text-black">{r.title}</div><div className="text-xs text-orange-500 font-medium">整道菜</div></div></button>))}</div></div>)}
-                        {(searchResults.ingredients.length > 0 || searchResults.products.length > 0) && (<div><h4 className="text-xs font-bold text-slate-400 uppercase mb-3 pl-1">食材库</h4><div className="space-y-2">{[...searchResults.ingredients, ...searchResults.products].map(i => (<button key={i.id} onClick={()=>handleSelectSearchResult(i, i.calories ? 'product' : 'ingredient')} className="w-full p-4 bg-white border border-slate-100 rounded-xl flex justify-between items-center hover:border-black transition-all group"><div className="text-left"><div className="font-bold text-slate-900 group-hover:text-black">{i.name}</div><div className="text-xs text-slate-400 mt-0.5">{fmt(i.calories)} kcal/100g</div></div><Plus size={16} className="text-slate-300 group-hover:text-black"/></button>))}</div></div>)}
+                        {[...searchResults.ingredients, ...searchResults.products].map(i => (
+  <button 
+    key={i.id} 
+    onClick={()=>handleSelectSearchResult(i, i.calories ? 'product' : 'ingredient')} 
+    className="w-full p-3 bg-white border border-slate-100 rounded-xl flex justify-between items-center hover:border-black transition-all group"
+  >
+    {/* 左侧：图片 + 文字 */}
+    <div className="flex items-center gap-3 overflow-hidden">
+      {/* 缩略图容器 */}
+      <div className="w-10 h-10 bg-slate-100 rounded-lg shrink-0 overflow-hidden border border-slate-100 relative">
+        {i.image_url ? (
+          <img src={i.image_url} className="w-full h-full object-cover" />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center text-xs font-bold text-slate-300">
+            {i.name?.[0]}
+          </div>
+        )}
+      </div>
+      
+      {/* 文字信息 */}
+      <div className="text-left min-w-0">
+        <div className="font-bold text-slate-900 group-hover:text-black truncate">{i.name}</div>
+        <div className="text-xs text-slate-400 mt-0.5">
+          {fmt(i.calories)} kcal/{i.unit === 'g' || i.unit === 'ml' ? '100' : '1'}{i.unit}
+        </div>
+      </div>
+    </div>
+
+    {/* 右侧：加号图标 */}
+    <Plus size={18} className="text-slate-300 group-hover:text-black shrink-0 ml-2"/>
+  </button>
+))}
                         {searchResults.recipes.length===0 && searchResults.ingredients.length===0 && searchResults.products.length===0 && (<div className="text-center py-8"><p className="text-slate-400 mb-4">未找到 "{search}"</p><button onClick={()=>{setMode('custom');setFormItem(prev=>({...prev,name:search}))}} className="bg-black text-white px-6 py-3 rounded-xl font-bold hover:bg-slate-800 transition-colors">创建自定义食物</button></div>)}
                      </div>
                    )}
@@ -383,7 +468,12 @@ export default function Diary() {
                  <div className="mx-auto pt-2 text-center">
                     <div className="w-20 h-20 bg-slate-100 mx-auto rounded-xl mb-3 flex items-center justify-center text-3xl shadow-inner overflow-hidden border border-slate-100">{formItem.image_url ? <img src={formItem.image_url} className="w-full h-full object-cover"/> : <span className="opacity-50 grayscale">🥘</span>}</div>
                     <h2 className="text-lg font-black text-slate-900 mb-2 leading-tight">{formItem.name}</h2>
-                    <div className="flex justify-center gap-2 mb-4"><span className="bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-lg text-xs font-bold">C: {fmt(formItem.density?.c || formItem.carbs)}</span><span className="bg-amber-50 text-amber-700 px-2 py-0.5 rounded-lg text-xs font-bold">P: {fmt(formItem.density?.p || formItem.protein)}</span><span className="bg-rose-50 text-rose-700 px-2 py-0.5 rounded-lg text-xs font-bold">F: {fmt(formItem.density?.f || formItem.fat)}</span></div>
+                    
+                    <div className="flex justify-center gap-2 mb-4">
+                        <span className="bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-lg text-xs font-bold">C: {fmt(formItem.density?.c || formItem.carbs)}</span>
+                        <span className="bg-amber-50 text-amber-700 px-2 py-0.5 rounded-lg text-xs font-bold">P: {fmt(formItem.density?.p || formItem.protein)}</span>
+                        <span className="bg-rose-50 text-rose-700 px-2 py-0.5 rounded-lg text-xs font-bold">F: {fmt(formItem.density?.f || formItem.fat)}</span>
+                    </div>
                     
                     {/* 数量与单位 */}
                     <div className="bg-slate-50 p-3 rounded-2xl mb-4 relative border border-slate-100 flex items-center justify-between gap-3">
@@ -417,9 +507,27 @@ export default function Diary() {
                       </div>
                     </div>
                     <div className="grid grid-cols-3 gap-4">
-                       {['carbs','protein','fat'].map(k=>(<div key={k} className="bg-slate-50 p-4 rounded-2xl border border-slate-100"><label className="text-[10px] text-slate-400 uppercase font-bold block mb-2">{k === 'carbs' ? '碳水' : k === 'protein' ? '蛋白质' : '脂肪'} (g/100g)</label><input type="number" onFocus={(e)=>e.target.select()} className="w-full bg-transparent border-b border-slate-300 focus:border-black outline-none font-bold text-xl pb-1 text-slate-900" value={formItem[k]} onChange={e=>setFormItem({...formItem,[k]:e.target.value})}/></div>))}
+                       {/* [关键修改] 显示动态单位：每100g 或 每1份 */}
+                       {['carbs','protein','fat'].map(k=>(
+                         <div key={k} className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                           <label className="text-[10px] text-slate-400 uppercase font-bold block mb-2">
+                             {k === 'carbs' ? '碳水' : k === 'protein' ? '蛋白质' : '脂肪'} 
+                             {/* 动态显示单位 */}
+                             <span className="opacity-60 ml-1">
+                               {formItem.unit === 'g' || formItem.unit === 'ml' ? '(g/100g)' : `(g/1${UNIT_OPTIONS.find(u=>u.value===formItem.unit)?.label})`}
+                             </span>
+                           </label>
+                           <input type="number" onFocus={(e)=>e.target.select()} className="w-full bg-transparent border-b border-slate-300 focus:border-black outline-none font-bold text-xl pb-1 text-slate-900" value={formItem[k]} onChange={e=>setFormItem({...formItem,[k]:e.target.value})}/>
+                         </div>
+                       ))}
                     </div>
-                    <div className="bg-slate-900 text-white p-5 rounded-2xl text-center"><div className="text-xs opacity-60 uppercase mb-1">估算热量 (100g)</div><div className="text-2xl font-black">{fmt(formItem.calories)} <span className="text-sm font-normal opacity-50">kcal</span></div></div>
+                    <div className="bg-slate-900 text-white p-5 rounded-2xl text-center">
+                       <div className="text-xs opacity-60 uppercase mb-1">
+                         {/* 动态显示热量单位 */}
+                         估算热量 {formItem.unit === 'g' || formItem.unit === 'ml' ? '(100g)' : `(1${UNIT_OPTIONS.find(u=>u.value===formItem.unit)?.label})`}
+                       </div>
+                       <div className="text-2xl font-black">{fmt(formItem.calories)} <span className="text-sm font-normal opacity-50">kcal</span></div>
+                    </div>
                     
                     {/* [核心修改] 自定义模式下的摄入量：升级为支持单位 */}
                     <div className="border-t border-slate-100 pt-6">

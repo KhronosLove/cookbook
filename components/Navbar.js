@@ -41,44 +41,39 @@ export default function Navbar() {
     { name: '统计', href: '/statistics' },
   ]
 
-  return (
+return (
     <>
       {/* ==============================
           1. 移动端：顶部导航栏
           ============================== */}
-      <div className="fixed top-0 left-0 right-0 h-14 bg-white/90 backdrop-blur-md border-b border-gray-100 z-50 flex items-center justify-between px-4 sm:hidden">
+      <div className="fixed top-0 left-0 right-0 h-14 bg-white dark:bg-white border-b border-gray-100 z-50 flex items-center justify-between px-4 sm:hidden">
         {/* 左侧：标题 */}
-        <Link href="/" className="font-black text-lg tracking-tight active:opacity-70 transition-opacity">
+        <Link href="/" className="font-black text-lg tracking-tight active:opacity-70 transition-opacity text-black dark:text-black">
           🥕 Kyle's Cookbook
         </Link>
 
-        {/* 右侧：功能区 (设置 + 个人中心) */}
-        <div className="flex items-center gap-2">
-          {/* 仅在已登录时显示设置按钮 */}
-          {user && (
-            <Link 
-              href="/settings"
-              className={`p-2 rounded-full transition-colors ${
-                pathname === '/settings' ? 'bg-black text-white' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
-              }`}
-            >
-              <Settings size={20} />
-            </Link>
-          )}
+        {/* 右侧区域：设置 + 登录/个人中心 */}
+        <div className="flex items-center gap-3">
+          
+          {/* [修改] 设置按钮：现在对所有人可见 (不再检查 user) */}
+          <Link 
+            href="/settings"
+            className="p-2 bg-gray-50 rounded-full text-gray-600 dark:text-gray-600 hover:bg-gray-100 transition-colors"
+          >
+            <Settings size={20} />
+          </Link>
 
-          {/* 登录/个人中心 */}
+          {/* 登录/个人中心按钮 */}
           <Link 
             href={user ? '/profile' : '/login'}
-            className={`p-2 rounded-full transition-colors ${
-              pathname === '/profile' ? 'bg-black text-white' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
-            }`}
+            className="p-2 bg-gray-50 rounded-full text-gray-600 dark:text-gray-600 hover:bg-gray-100 transition-colors"
           >
             {user ? <User size={20} /> : <LogIn size={20} />}
           </Link>
         </div>
       </div>
 
-      {/* 顶部占位 */}
+      {/* 顶部占位 (防止内容被遮挡) */}
       <div className="h-14 sm:hidden"></div>
 
 
