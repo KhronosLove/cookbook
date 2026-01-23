@@ -263,35 +263,35 @@ const handleMobileSort = (type) => {
     return (
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
         {/* Desktop Header */}
-        <div className="hidden sm:grid grid-cols-12 bg-gray-50 p-3 text-xs text-gray-500 font-medium border-b border-gray-100">
+        <div className="hidden sm:grid grid-cols-12 bg-gray-50 p-3 text-xs text-gray-900 font-medium border-b border-gray-100">
           <div className="col-span-5 pl-2 flex items-center cursor-pointer select-none hover:text-black transition-colors" onClick={() => handleSort('name')}>
-             名称 <SortIcon currentSortKey="name" />
+             <b>名称</b> <SortIcon currentSortKey="name" />
           </div>
           {type !== 'recipe' ? (
             <>
               <div className="col-span-2 flex items-center justify-center cursor-pointer select-none hover:text-black transition-colors" onClick={() => handleSort('calories')}>
-                 热量/单位 <SortIcon currentSortKey="calories" />
+                 <b>热量/单位</b> <SortIcon currentSortKey="calories" />
               </div>
-              <div className="col-span-3 text-center pt-0.5">碳 / 蛋 / 脂</div>
+              <div className="col-span-3 text-center pt-0.5"><b>碳 / 蛋 / 脂</b></div>
             </>
           ) : (
             <div className="col-span-5 flex items-center justify-center cursor-pointer select-none hover:text-black transition-colors" onClick={() => handleSort('created_at')}>
-               创建时间 <SortIcon currentSortKey="created_at" />
+               <b>创建时间 </b><SortIcon currentSortKey="created_at" />
             </div>
           )}
-          <div className="col-span-2 text-center pt-0.5">操作</div>
+          <div className="col-span-2 text-center pt-0.5"><b>操作</b></div>
         </div>
 
         {/* Mobile Header */}
-        <div className="sm:hidden flex items-center bg-gray-50 p-3 text-xs text-gray-500 font-medium border-b border-gray-100">
+        <div className="sm:hidden flex items-center bg-gray-50 p-3 text-xs text-gray-900 font-medium border-b border-gray-100">
           <div className="flex-1 pl-1 flex items-center gap-4">
              <div className="flex items-center gap-1 cursor-pointer active:opacity-60" onClick={() => handleSort('name')}>
-                名称 <SortIcon currentSortKey="name" />
+                <b>名称</b> <SortIcon currentSortKey="name" />
              </div>
              <span className="text-gray-500">|</span>
              <div className="flex items-center gap-1 cursor-pointer active:opacity-60" onClick={() => handleMobileSort(type)}>
-                {type === 'recipe' ? '日期' : '热量 '} <SortIcon currentSortKey={type === 'recipe' ? 'created_at' : 'calories'} />
-             <div className="col-span-3 text-center pt-0.5"> &nbsp;&nbsp;<span className="text-gray-500">|</span>&nbsp; &nbsp;碳 / 蛋 / 脂</div>
+                <b>{type === 'recipe' ? '日期' : '热量 '}</b> <SortIcon currentSortKey={type === 'recipe' ? 'created_at' : 'calories'} />
+             <div className="col-span-3 text-center pt-0.5"> &nbsp;&nbsp;<span className="text-gray-500">|</span>&nbsp; &nbsp;<b>碳 / 蛋 / 脂</b></div>
              </div>
           </div>
           <div className="w-16 flex-shrink-0"></div> 
