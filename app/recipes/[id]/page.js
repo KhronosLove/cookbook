@@ -19,6 +19,41 @@ export default function RecipeDetail() {
 
   const fmt = (n) => Number(n || 0).toFixed(1)
 
+  // --- [新增] 自动识别链接的组件 ---
+  const ContentWithLinks = ({ text }) => {
+  if (!text) return null;
+
+  // 正则表达式：匹配 http 或 https 开头的网址
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
+  
+  // 按网址分割字符串
+  const parts = text.split(urlRegex);
+
+  return (
+    <span className="whitespace-pre-wrap"> {/* 保留换行符 */}
+      {parts.map((part, index) => {
+        // 如果这一段是网址
+        if (part.match(urlRegex)) {
+          return (
+            <a 
+              key={index} 
+              href={part} 
+              target="_blank" 
+              rel="noopener noreferrer" 
+              className="text-blue-600 hover:text-blue-800 underline break-all"
+              onClick={(e) => e.stopPropagation()} // 防止冒泡
+            >
+              {part}
+            </a>
+          );
+        }
+        // 如果是普通文本
+        return part;
+      })}
+    </span>
+  );
+};
+
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true)
@@ -104,7 +139,7 @@ export default function RecipeDetail() {
             <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-3">{recipe.title}</h1>
             <div className="flex flex-wrap gap-2">{recipe.tags?.map(t => (<span key={t} className="text-xs font-bold bg-gray-100 text-gray-600 px-2.5 py-1 rounded-md">{t}</span>))}</div>
           </div>
-          {recipe.description && (<div className="bg-gray-50 p-4 sm:p-5 rounded-2xl text-sm text-gray-600 leading-relaxed mb-8 border border-gray-100">{recipe.description}</div>)}
+          {recipe.description && (<div className="bg-gray-50 p-4 sm:p-5 rounded-2xl text-sm text-gray-600 leading-relaxed mb-8 border border-gray-100"><ContentWithLinks text={recipe.description} /></div>)}
 
           {/* --- 营养素仪表盘 (响应式字体优化) --- */}
           {/* gap-2 在手机上更紧凑，sm:gap-3 在电脑上更宽敞 */}

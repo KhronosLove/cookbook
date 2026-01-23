@@ -28,7 +28,7 @@ export default function EditRecipe() {
 
   useEffect(() => {
     const initData = async () => {
-      const { data } = await supabase
+      const { tagsData } = await supabase
         .from('defined_tags')
         .select('*')
         // 加上这两行核心排序逻辑

@@ -9,7 +9,7 @@ import PageContainer from '@/components/PageContainer'
 
 export default function RecipeList() {
   const [recipes, setRecipes] = useState([])
-  const [tagGroups, setTagGroups] = useState({}) 
+  const [tagGroups, setTagGroups] = useState([])
   const [filters, setFilters] = useState({}) 
   const [search, setSearch] = useState('')
   
@@ -18,41 +18,64 @@ export default function RecipeList() {
   const [showSortMenu, setShowSortMenu] = useState(false)
 
   useEffect(() => {
+    // 1. 获取标签 (Fetch Tags)
     const fetchTags = async () => {
-        const { data } = await supabase
+      const { data } = await supabase
         .from('defined_tags')
         .select('*')
-        // 加上这两行核心排序逻辑
-        .order('category_rank', { ascending: true }) // 先排大类
-        .order('tag_rank', { ascending: true })      // 再排小标签
-        .order('id', { ascending: true });           // 最后用ID兜底
+        .order('category_rank', { ascending: true }) 
+        .order('tag_rank', { ascending: true })
+        .order('id', { ascending: true });
+
       if (data) {
-        const groups = {}
-        const initialFilters = {}
+        const orderedGroups = [];
+        const map = new Map();
+        const initialFilters = {};
+
         data.forEach(t => {
-          if (!groups[t.category]) groups[t.category] = []
-          groups[t.category].push(t.name)
-          initialFilters[t.category] = '全部' 
-        })
-        setTagGroups(groups)
-        setFilters(initialFilters)
+          if (!map.has(t.category)) {
+            const newGroup = { category: t.category, tags: [] };
+            map.set(t.category, newGroup);
+            orderedGroups.push(newGroup);
+            
+            if (filters[t.category] === undefined) {
+               initialFilters[t.category] = '全部';
+            }
+          }
+          map.get(t.category).tags.push(t.name);
+        });
+
+        setTagGroups(orderedGroups);
+        
+        if (Object.keys(filters).length === 0) {
+           setFilters(prev => ({ ...prev, ...initialFilters }));
+        }
       }
     }
 
+    // 2. [补回缺失的] 获取菜谱 (Fetch Recipes)
     const fetchRecipes = async () => {
-      const { data } = await supabase.from('recipes').select('*').order('created_at', { ascending: false })
-      setRecipes(data || [])
+      const { data, error } = await supabase
+        .from('recipes')
+        .select('*')
+        .order('created_at', { ascending: false });
+      
+      if (data) {
+        setRecipes(data);
+      }
     }
 
-    fetchTags()
-    fetchRecipes()
+    // 执行
+    fetchTags();
+    fetchRecipes();
   }, [])
 
   // 1. 筛选逻辑
   const filteredList = recipes.filter(r => {
-    const matchSearch = !search || r.title.includes(search)
+    const matchSearch = !search || r.title.toLowerCase().includes(search.toLowerCase())
     const matchTags = Object.entries(filters).every(([cat, selectedValue]) => {
       if (selectedValue === '全部') return true
+      // 兼容 null 或 undefined 的 tags
       return r.tags && r.tags.includes(selectedValue)
     })
     return matchSearch && matchTags
@@ -64,14 +87,15 @@ export default function RecipeList() {
       return new Date(b.created_at) - new Date(a.created_at)
     }
     if (sortBy === 'name') {
-      return a.title.localeCompare(b.title, 'zh-CN') // 支持中文 A-Z
+      return (a.title || '').localeCompare((b.title || ''), 'zh-CN')
     }
     return 0
   })
 
+  // 重置逻辑
   const resetFilters = () => {
     const newFilters = {}
-    Object.keys(tagGroups).forEach(k => newFilters[k] = '全部')
+    tagGroups.forEach(group => newFilters[group.category] = '全部')
     setFilters(newFilters)
   }
 
@@ -79,7 +103,7 @@ export default function RecipeList() {
     <>
       <Navbar />
       <PageContainer>
-        {/* --- 顶部工具栏 (完全保留原样) --- */}
+        {/* --- 顶部工具栏 --- */}
         <div className="p-6 pb-2 border-b border-gray-100">
           <div className="flex flex-col sm:flex-row gap-4 justify-between items-center mb-6">
             <h1 className="text-2xl font-bold text-gray-900 hidden sm:block">菜谱库</h1>
@@ -130,19 +154,19 @@ export default function RecipeList() {
             </div>
           </div>
 
-          {/* --- 筛选 Tag (完全保留原样) --- */}
+          {/* --- 筛选 Tag --- */}
           <div className="space-y-3 pb-2">
             <div className="flex gap-4 overflow-x-auto no-scrollbar items-center">
               <span className="text-xs font-bold text-gray-400 w-10 shrink-0">综合</span>
               <button onClick={resetFilters} className={`text-xs px-3 py-1.5 rounded-lg font-medium whitespace-nowrap transition-colors ${Object.values(filters).every(v => v === '全部') ? 'bg-black text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>全部</button>
             </div>
-            {Object.entries(tagGroups).map(([category, tags]) => (
-              <div key={category} className="flex gap-4 overflow-x-auto no-scrollbar items-center">
-                <span className="text-xs font-bold text-gray-400 w-10 shrink-0">{category}</span>
+            {tagGroups.map((group) => (
+              <div key={group.category} className="flex gap-4 overflow-x-auto no-scrollbar items-center">
+                <span className="text-xs font-bold text-gray-400 w-10 shrink-0">{group.category}</span>
                 <div className="flex gap-2">
-                  <button onClick={() => setFilters({ ...filters, [category]: '全部' })} className={`text-xs px-3 py-1.5 rounded-lg font-medium whitespace-nowrap transition-colors ${filters[category] === '全部' ? 'bg-black/5 text-black font-bold' : 'text-gray-500 hover:bg-gray-100'}`}>全部</button>
-                  {[...new Set(tags)].map(tag => (
-                    <button key={tag} onClick={() => setFilters({ ...filters, [category]: tag })} className={`text-xs px-3 py-1.5 rounded-lg font-medium whitespace-nowrap transition-colors ${filters[category] === tag ? 'bg-orange-100 text-orange-700 font-bold' : 'text-gray-500 hover:bg-gray-100 hover:text-gray-900'}`}>{tag}</button>
+                  <button onClick={() => setFilters({ ...filters, [group.category]: '全部' })} className={`text-xs px-3 py-1.5 rounded-lg font-medium whitespace-nowrap transition-colors ${filters[group.category] === '全部' ? 'bg-black/5 text-black font-bold' : 'text-gray-500 hover:bg-gray-100'}`}>全部</button>
+                  {[...new Set(group.tags)].map(tag => (
+                    <button key={tag} onClick={() => setFilters({ ...filters, [group.category]: tag })} className={`text-xs px-3 py-1.5 rounded-lg font-medium whitespace-nowrap transition-colors ${filters[group.category] === tag ? 'bg-orange-100 text-orange-700 font-bold' : 'text-gray-500 hover:bg-gray-100 hover:text-gray-900'}`}>{tag}</button>
                   ))}
                 </div>
               </div>
@@ -150,18 +174,17 @@ export default function RecipeList() {
           </div>
         </div>
 
-        {/* --- 列表内容 (只修改了卡片内部样式) --- */}
+        {/* --- 列表内容 --- */}
         <div className="p-6 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
           {sortedList.map(recipe => (
             <Link href={`/recipes/${recipe.id}`} key={recipe.id} className="block group">
               <div className="bg-white rounded-xl overflow-hidden border border-gray-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
                 
-                {/* 图片容器：添加了 overflow-hidden */}
+                {/* 图片容器 */}
                 <div className="aspect-[4/3] bg-gray-100 relative overflow-hidden">
                   {recipe.cover_image ? (
                     <img 
                       src={recipe.cover_image} 
-                      /* 核心动画修改：group-hover:scale-105 */
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 ease-out" 
                       alt={recipe.title}
                     />
@@ -182,10 +205,10 @@ export default function RecipeList() {
                   <h3 className="font-bold text-gray-900 text-sm truncate mb-1">{recipe.title}</h3>
                   <p className="text-[10px] text-gray-500 line-clamp-1 mb-2">{recipe.description || '暂无简介'}</p>
                   
-                  {/* 核心修改：新增底部 GO 栏 */}
+                  {/* 底部 GO 栏 */}
                   <div className="pt-2 border-t border-gray-50 flex justify-between items-center text-[10px] font-bold text-gray-300">
-                     <span>{new Date(recipe.created_at).toLocaleDateString()}</span>
-                     <span className="text-orange-500 opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-300">GO →</span>
+                      <span>{new Date(recipe.created_at).toLocaleDateString()}</span>
+                      <span className="text-orange-500 opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-300">GO →</span>
                   </div>
                 </div>
               </div>

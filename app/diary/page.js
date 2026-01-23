@@ -29,7 +29,7 @@ const UNIT_OPTIONS = [
   //{ value: 'bowl', label: '碗', defaultWeight: 300 },
   //{ value: 'cup', label: '杯', defaultWeight: 250 },
   { value: 'serving', label: '份', defaultWeight: 100 },
-  //{ value: 'piece', label: '个/只', defaultWeight: 50 },
+  { value: 'piece', label: '个/只', defaultWeight: 50 }；
   //{ value: 'slice', label: '片', defaultWeight: 30 },
   //{ value: 'scoop', label: '勺', defaultWeight: 15 },
 ]

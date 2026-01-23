@@ -12,13 +12,9 @@ const UNIT_OPTIONS = [
   { value: 'g', label: '克 (g)' },
   { value: 'ml', label: '毫升 (ml)' },
   { value: 'pkg', label: '包/袋' },
-  { value: 'box', label: '盒' },
-  { value: 'bowl', label: '碗' },
-  { value: 'cup', label: '杯' },
   { value: 'serving', label: '份' },
-  { value: 'piece', label: '个/只' },
-  { value: 'slice', label: '片' },
-  { value: 'scoop', label: '勺' },
+  { value: 'piece', label: '个/只' }；
+
 ]
 
 export default function SettingsPage() {
@@ -31,14 +27,11 @@ export default function SettingsPage() {
   const [ingredients, setIngredients] = useState([])
   const [products, setProducts] = useState([])
   const [search, setSearch] = useState('')
-  
-  // [新增] 排序状态
   const [sortConfig, setSortConfig] = useState({ key: 'name', direction: 'asc' })
 
   const [newTagCat, setNewTagCat] = useState('菜系')
   const [newTagName, setNewTagName] = useState('')
   
-  // 编辑/新增 Modal 状态
   const [editingItem, setEditingItem] = useState(null)
   const [modalType, setModalType] = useState('ingredient')
   
@@ -55,81 +48,156 @@ export default function SettingsPage() {
 
   // --- Fetch Data ---
   const fetchTags = async () => { 
-    const { data } = await supabase.from('defined_tags').select('*').order('category_rank', { ascending: true }).order('tag_rank', { ascending: true }).order('id', { ascending: true }); 
+    // 获取时严格按 Rank 排序
+    const { data } = await supabase.from('defined_tags').select('*').order('category_rank', { ascending: true }).order('tag_rank', { ascending: true }); 
     setTags(data || []) 
   }
   const fetchRecipes = async () => { const { data } = await supabase.from('recipes').select('id, title, created_at, cover_image'); setRecipes(data || []) }
   const fetchIngredients = async () => { const { data } = await supabase.from('ingredients_library').select('*'); setIngredients(data || []) }
   const fetchProducts = async () => { const { data } = await supabase.from('products_library').select('*'); setProducts(data || []) }
 
-  // --- [新增] 排序处理函数 ---
   const handleSort = (key) => {
     let direction = 'asc';
-    if (sortConfig.key === key && sortConfig.direction === 'asc') {
-      direction = 'desc';
-    }
+    if (sortConfig.key === key && sortConfig.direction === 'asc') direction = 'desc';
     setSortConfig({ key, direction });
   }
 
+const handleMobileSort = (type) => {
+    const targetKey = type === 'recipe' ? 'created_at' : 'calories';
+    
+    if (sortConfig.key === targetKey) {
+        // 如果当前已经是按热量/时间排，则反转方向
+        setSortConfig({ 
+            key: targetKey, 
+            direction: sortConfig.direction === 'desc' ? 'asc' : 'desc' 
+        });
+    } else {
+        // 如果之前是按名字排，切过来默认降序 (通常想先看高热量或最新的)
+        setSortConfig({ key: targetKey, direction: 'desc' });
+    }
+  }
   // --- Tags Logic ---
   const handleAddTag = async () => { 
     if (!newTagName) return; 
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { alert('请先登录！'); return }
+    
+    // 智能计算 Rank: 找到同类中最大的，+1
     const currentCatTags = tags.filter(t => t.category === newTagCat);
     const maxRank = currentCatTags.length > 0 ? Math.max(...currentCatTags.map(t => t.tag_rank || 0)) : 0;
+    
+    // 分类 Rank: 沿用已有的，或者是新的最大值
     const existingCat = tags.find(t => t.category === newTagCat);
-    const catRank = existingCat ? existingCat.category_rank : (tags.length > 0 ? Math.max(...tags.map(t => t.category_rank || 0)) + 1 : 0);
+    const catRank = existingCat ? (existingCat.category_rank || 0) : (tags.length > 0 ? Math.max(...tags.map(t => t.category_rank || 0)) + 1 : 1);
+
     const { error } = await supabase.from('defined_tags').insert([{ user_id: user.id, category: newTagCat || '未分类', name: newTagName, tag_rank: maxRank + 1, category_rank: catRank }]); 
     if (!error) { setNewTagName(''); fetchTags() } else { alert(`添加失败: ${error.message}`) }
   }
+
   const handleDeleteTag = async (id) => { if(!confirm('删除标签?')) return; await supabase.from('defined_tags').delete().eq('id', id); fetchTags() }
+  
+  // [修复] 删除分类
+  const handleDeleteCategory = async (cat) => {
+    if (!confirm(`⚠️ 警告：确定删除分类 "${cat}" 吗？\n这将删除该分类下的所有标签！`)) return;
+    
+    // 先找到所有属于该分类的 ID (更安全)
+    const tagsToDelete = tags.filter(t => t.category === cat);
+    const ids = tagsToDelete.map(t => t.id);
+
+    if (ids.length === 0) return;
+
+    const { error } = await supabase.from('defined_tags').delete().in('id', ids); // 使用 ID 删除，避免字符匹配问题
+    if (error) alert(`删除失败: ${error.message}`);
+    fetchTags();
+  }
+
   const handleDeleteRecipe = async (id) => { if(!confirm('删除菜谱?')) return; await supabase.from('recipes').delete().eq('id', id); fetchRecipes() }
   const handleDeleteItem = async (id, type) => { if(!confirm('删除?')) return; await supabase.from(type === 'ingredient' ? 'ingredients_library' : 'products_library').delete().eq('id', id); type === 'ingredient' ? fetchIngredients() : fetchProducts() }
 
-  // --- Rank Logic (Tags) ---
+  // 辅助：安全排序函数 (防止分类散架)
+  const sortTagsSafe = (tagsList) => {
+    return tagsList.sort((a, b) => {
+      const catRankDiff = (a.category_rank || 0) - (b.category_rank || 0);
+      if (catRankDiff !== 0) return catRankDiff;
+      if (a.category !== b.category) return a.category.localeCompare(b.category, 'zh-Hans-CN');
+      return (a.tag_rank || 0) - (b.tag_rank || 0);
+    });
+  }
+
+  // 1. 移动标签 (已修复逻辑)
   const moveTag = async (tag, direction) => {
-    const siblings = tags.filter(t => t.category === tag.category);
+    const siblings = tags.filter(t => t.category === tag.category); // 只看同类兄弟
     const currentIndex = siblings.findIndex(t => t.id === tag.id);
     if (currentIndex === -1) return;
+    
     const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
     if (targetIndex < 0 || targetIndex >= siblings.length) return;
-    const itemA = siblings[currentIndex]; const itemB = siblings[targetIndex];
-    let rankA = itemA.tag_rank || 0; let rankB = itemB.tag_rank || 0;
-    if (rankA === rankB) rankA = rankB + 1;
-    const minRank = Math.min(rankA, rankB); const maxRank = Math.max(rankA, rankB);
-    let newRankA, newRankB;
-    if (direction === 'up') { newRankA = minRank; newRankB = maxRank; if (newRankA === newRankB) newRankB = newRankA + 1; } 
-    else { newRankA = maxRank; newRankB = minRank; if (newRankA === newRankB) newRankA = newRankB + 1; }
-    const newTags = [...tags]; const idxA = newTags.findIndex(t => t.id === itemA.id); const idxB = newTags.findIndex(t => t.id === itemB.id);
-    newTags[idxA].tag_rank = newRankA; newTags[idxB].tag_rank = newRankB;
-    setTags(newTags.sort((a,b) => a.category_rank - b.category_rank || a.tag_rank - b.tag_rank));
-    await supabase.from('defined_tags').update({ tag_rank: newRankA }).eq('id', itemA.id);
-    await supabase.from('defined_tags').update({ tag_rank: newRankB }).eq('id', itemB.id);
+    
+    const itemA = siblings[currentIndex]; 
+    const itemB = siblings[targetIndex]; // 要交换的目标
+
+    // 交换 Rank
+    let rankA = itemA.tag_rank || 0; 
+    let rankB = itemB.tag_rank || 0;
+    
+    // 如果 Rank 相同，强制错开
+    if (rankA === rankB) { rankA = rankB + 1; }
+
+    const newTags = tags.map(t => {
+        if (t.id === itemA.id) return { ...t, tag_rank: rankB }; // A 变成 B 的 rank
+        if (t.id === itemB.id) return { ...t, tag_rank: rankA }; // B 变成 A 的 rank
+        return t;
+    });
+
+    setTags(sortTagsSafe(newTags)); // 乐观更新 UI
+
+    // 提交数据库
+    await supabase.from('defined_tags').update({ tag_rank: rankB }).eq('id', itemA.id);
+    await supabase.from('defined_tags').update({ tag_rank: rankA }).eq('id', itemB.id);
   }
+
+  // 2. 移动分类 (已修复逻辑)
   const moveCategory = async (categoryName, direction) => {
-    const uniqueCats = [...new Set(tags.map(t => t.category))];
+    // 拿到所有唯一的分类名
+    const uniqueCats = [...new Set(tags.map(t => t.category))].sort((a, b) => {
+        // 按当前的 Rank 排序找到正确的顺序
+        const rankA = tags.find(t => t.category === a)?.category_rank || 0;
+        const rankB = tags.find(t => t.category === b)?.category_rank || 0;
+        return rankA - rankB;
+    });
+
     const currentIdx = uniqueCats.indexOf(categoryName);
     if (currentIdx === -1) return;
+    
     const targetIdx = direction === 'up' ? currentIdx - 1 : currentIdx + 1;
     if (targetIdx < 0 || targetIdx >= uniqueCats.length) return;
+    
     const targetCatName = uniqueCats[targetIdx];
+
+    // 获取两个分类当前的 Rank
     let rank1 = tags.find(t => t.category === categoryName)?.category_rank || 0;
     let rank2 = tags.find(t => t.category === targetCatName)?.category_rank || 0;
-    if (rank1 === rank2) rank1 = rank2 + 1;
-    const minRank = Math.min(rank1, rank2); const maxRank = Math.max(rank1, rank2);
-    let newRank1, newRank2;
-    if (direction === 'up') { newRank1 = minRank; newRank2 = maxRank; if (newRank1 === newRank2) newRank2 = newRank1 + 1; }
-    else { newRank1 = maxRank; newRank2 = minRank; if (newRank1 === newRank2) newRank1 = newRank2 + 1; }
+    
+    // 如果 Rank 相同，强制区分
+    if (rank1 === rank2) { rank1 = rank2 + 1; }
+
+    // 乐观更新 UI: 把所有属于 categoryName 的 rank 改成 rank2 (对方的)，反之亦然
     const newTags = tags.map(t => {
-      if (t.category === categoryName) return { ...t, category_rank: newRank1 };
-      if (t.category === targetCatName) return { ...t, category_rank: newRank2 };
+      if (t.category === categoryName) return { ...t, category_rank: rank2 };
+      if (t.category === targetCatName) return { ...t, category_rank: rank1 };
       return t;
     });
-    setTags(newTags.sort((a,b) => a.category_rank - b.category_rank || a.tag_rank - b.tag_rank));
-    await supabase.from('defined_tags').update({ category_rank: newRank1 }).eq('category', categoryName);
-    await supabase.from('defined_tags').update({ category_rank: newTargetRank }).eq('category', targetCatName);
+
+    setTags(sortTagsSafe(newTags));
+
+    // 提交数据库: 批量更新
+    await supabase.from('defined_tags').update({ category_rank: rank2 }).eq('category', categoryName);
+    await supabase.from('defined_tags').update({ category_rank: rank1 }).eq('category', targetCatName);
   }
+
+  // ... (handleRename, handleSaveItem 等保持不变，略) ...
+  // 为节省篇幅，这里省略了 handleRename, handleAddClick, openEditModal, handleFormChange, handleImageUpload, handleSaveItem
+  // 请保留你原来代码中的这些函数，它们逻辑是正确的。
   const handleRename = async (type, originalName, id = null) => {
     const newName = prompt(`新名称:`, originalName);
     if (!newName || newName === originalName) return;
@@ -137,10 +205,7 @@ export default function SettingsPage() {
     else { await supabase.from('defined_tags').update({ name: newName }).eq('id', id); }
     fetchTags();
   }
-
-  // --- Item Form Logic ---
   const handleAddClick = () => { if (activeTab === 'recipes') { router.push('/recipes/new') } else { openEditModal(null, activeTab === 'ingredients' ? 'ingredient' : 'product') } }
-  
   const openEditModal = (item, type) => { 
     setEditingItem(item || {}); setModalType(type); 
     if (item) { setFormData({ name: item.name, unit: item.unit || 'g', calories: item.calories || 0, protein: item.protein || 0, fat: item.fat || 0, carbs: item.carbs || 0, image_url: item.image_url || '' }) } 
@@ -152,7 +217,6 @@ export default function SettingsPage() {
     setFormData(newData) 
   }
   const handleImageUpload = async (e) => { const file = e.target.files[0]; if (!file) return; setUploading(true); try { const fileExt = file.name.split('.').pop(); const filePath = `thumbs/${Math.random()}.${fileExt}`; const { error } = await supabase.storage.from('recipe-images').upload(filePath, file); if (error) throw error; const { data } = supabase.storage.from('recipe-images').getPublicUrl(filePath); setFormData(prev => ({ ...prev, image_url: data.publicUrl })) } catch (err) { alert('上传失败') } finally { setUploading(false) } }
-  
   const handleSaveItem = async () => { 
     const { data: { user } } = await supabase.auth.getUser(); 
     if (!user) return alert('请先登录');
@@ -161,87 +225,74 @@ export default function SettingsPage() {
     let error;
     if (editingItem.id) { const res = await supabase.from(table).update(payload).eq('id', editingItem.id); error = res.error; } 
     else { const res = await supabase.from(table).insert([payload]); error = res.error; }
-    if (error) { console.error(error); alert(`保存失败: ${error.message}`); } 
+    if (error) { alert(`保存失败: ${error.message}`); } 
     else { setEditingItem(null); modalType === 'ingredient' ? fetchIngredients() : fetchProducts() }
   }
 
-  // --- [修改] Render List with Sorting ---
+
+  // --- Render List with Sorting ---
   const renderList = (data, type) => {
-    // 1. 过滤
     let filtered = data.filter(i => (i.name || i.title).toLowerCase().includes(search.toLowerCase()))
     
-    // 2. [新增] 排序逻辑
     filtered.sort((a, b) => {
-      let aVal, bVal;
-      
+      let result = 0;
       if (sortConfig.key === 'name') {
-        aVal = (type === 'recipe' ? a.title : a.name) || '';
-        bVal = (type === 'recipe' ? b.title : b.name) || '';
-        // 中文/英文混合排序
-        return sortConfig.direction === 'asc' 
-          ? aVal.localeCompare(bVal, 'zh-Hans-CN') 
-          : bVal.localeCompare(aVal, 'zh-Hans-CN');
+        const aVal = (type === 'recipe' ? a.title : a.name) || '';
+        const bVal = (type === 'recipe' ? b.title : b.name) || '';
+        result = aVal.localeCompare(bVal, 'zh-Hans-CN');
       } 
-      
-      if (sortConfig.key === 'calories') {
-        // 菜谱按创建时间排，食材按热量排
+      else if (sortConfig.key === 'calories' || sortConfig.key === 'created_at') {
         if (type === 'recipe') {
-           aVal = new Date(a.created_at).getTime();
-           bVal = new Date(b.created_at).getTime();
+           const aVal = new Date(a.created_at).getTime(); 
+           const bVal = new Date(b.created_at).getTime();
+           result = aVal - bVal;
         } else {
-           aVal = Number(a.calories || 0);
-           bVal = Number(b.calories || 0);
+           const aVal = Number(a.calories || 0); 
+           const bVal = Number(b.calories || 0);
+           result = aVal - bVal;
         }
-        return sortConfig.direction === 'asc' ? aVal - bVal : bVal - aVal;
       }
-      
-      return 0;
+      return sortConfig.direction === 'asc' ? result : -result;
     });
 
-    // 辅助组件：排序表头
-    const SortHeader = ({ label, sortKey, align = 'left' }) => (
-      <div 
-        onClick={() => handleSort(sortKey)} 
-        className={`flex items-center gap-1 cursor-pointer hover:bg-gray-100 p-1 rounded transition-colors select-none ${align === 'center' ? 'justify-center' : ''}`}
-      >
-        <span>{label}</span>
-        <div className="flex flex-col text-gray-400">
-           {sortConfig.key === sortKey ? (
-             sortConfig.direction === 'asc' ? <ArrowUp size={12} className="text-black"/> : <ArrowDown size={12} className="text-black"/>
-           ) : (
-             <ArrowUpDown size={12} className="opacity-50"/>
-           )}
-        </div>
-      </div>
-    )
-    
+    const SortIcon = ({ currentSortKey }) => {
+        if (sortConfig.key !== currentSortKey) return <ArrowUpDown size={12} className="text-gray-300 ml-1"/>;
+        return sortConfig.direction === 'asc' ? <ArrowUp size={12} className="text-black ml-1"/> : <ArrowDown size={12} className="text-black ml-1"/>;
+    }
+
     return (
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
         {/* Desktop Header */}
         <div className="hidden sm:grid grid-cols-12 bg-gray-50 p-3 text-xs text-gray-500 font-medium border-b border-gray-100">
-          <div className="col-span-5 pl-2">
-             <SortHeader label="名称" sortKey="name" />
+          <div className="col-span-5 pl-2 flex items-center cursor-pointer select-none hover:text-black transition-colors" onClick={() => handleSort('name')}>
+             名称 <SortIcon currentSortKey="name" />
           </div>
           {type !== 'recipe' ? (
             <>
-              <div className="col-span-2 text-center">
-                 <SortHeader label="热量/单位" sortKey="calories" align="center" />
+              <div className="col-span-2 flex items-center justify-center cursor-pointer select-none hover:text-black transition-colors" onClick={() => handleSort('calories')}>
+                 热量/单位 <SortIcon currentSortKey="calories" />
               </div>
-              <div className="col-span-3 text-center pt-1">碳 / 蛋 / 脂</div>
+              <div className="col-span-3 text-center pt-0.5">碳 / 蛋 / 脂</div>
             </>
           ) : (
-            <div className="col-span-5 text-center">
-               <SortHeader label="创建时间" sortKey="calories" align="center" />
+            <div className="col-span-5 flex items-center justify-center cursor-pointer select-none hover:text-black transition-colors" onClick={() => handleSort('created_at')}>
+               创建时间 <SortIcon currentSortKey="created_at" />
             </div>
           )}
-          <div className="col-span-2 text-center pt-1">操作</div>
+          <div className="col-span-2 text-center pt-0.5">操作</div>
         </div>
 
-        {/* Mobile Header (简化，不放复杂排序按钮以免误触，或仅保留名称排序) */}
+        {/* Mobile Header */}
         <div className="sm:hidden flex items-center bg-gray-50 p-3 text-xs text-gray-500 font-medium border-b border-gray-100">
-          <div className="flex-1 pl-1 flex items-center gap-2" onClick={() => handleSort('name')}>
-             {type !== 'recipe' ? '名称 | 热量 | 碳蛋脂' : '名称 | 创建日期'}
-             <ArrowUpDown size={10} className="text-gray-400"/>
+          <div className="flex-1 pl-1 flex items-center gap-4">
+             <div className="flex items-center gap-1 cursor-pointer active:opacity-60" onClick={() => handleSort('name')}>
+                名称 <SortIcon currentSortKey="name" />
+             </div>
+             <span className="text-gray-500">|</span>
+             <div className="flex items-center gap-1 cursor-pointer active:opacity-60" onClick={() => handleMobileSort(type)}>
+                {type === 'recipe' ? '日期' : '热量 '} <SortIcon currentSortKey={type === 'recipe' ? 'created_at' : 'calories'} />
+             <div className="col-span-3 text-center pt-0.5"> &nbsp;&nbsp;<span className="text-gray-500">|</span>&nbsp; &nbsp;碳 / 蛋 / 脂</div>
+             </div>
           </div>
           <div className="w-16 flex-shrink-0"></div> 
         </div>
@@ -250,7 +301,7 @@ export default function SettingsPage() {
           {filtered.map(item => (
             <div key={item.id}>
               {/* Desktop View */}
-              <div className="hidden sm:grid grid-cols-12 p-3 items-center text-sm hover:bg-gray-50 transition-colors">
+              <div className="hidden sm:grid grid-cols-12 p-3 items-center text-xs hover:bg-gray-50 transition-colors">
                 <div className="col-span-5 flex items-center gap-3 overflow-hidden pr-2">
                   <div className="w-8 h-8 rounded bg-gray-100 shrink-0 overflow-hidden border border-gray-200">
                     {(item.image_url || item.cover_image) ? <img src={item.image_url || item.cover_image} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-gray-300 text-[10px]">{(item.name||item.title)[0]}</div>}
@@ -281,17 +332,17 @@ export default function SettingsPage() {
               {/* Mobile View */}
               <div className="sm:hidden p-3 flex items-center justify-between gap-0 hover:bg-gray-50 transition-colors">
                 <div className="flex-1 flex items-center gap-3 overflow-hidden pr-2">
-                  <div className="w-10 h-10 rounded bg-gray-100 shrink-0 overflow-hidden border border-gray-200">
+                  <div className="w-9 h-9 rounded bg-gray-100 shrink-0 overflow-hidden border border-gray-200">
                     {(item.image_url || item.cover_image) ? <img src={item.image_url || item.cover_image} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-gray-300 text-[10px]">{(item.name||item.title)[0]}</div>}
                   </div>
                   <div className="min-w-0 flex-1">
-                      <div className="font-bold text-gray-900 truncate">{item.name || item.title}</div>
-                      <div className="mt-0.5 text-xs">
+                      <div className="font-bold text-gray-900 truncate text-xs">{item.name || item.title}</div>
+                      <div className="mt-0.5 text-[10px]">
                         {type === 'recipe' ? (
                           <span className="text-gray-500">{new Date(item.created_at).toLocaleDateString()}</span>
                         ) : (
                           <div className="flex items-center gap-2">
-                             <span className="font-mono text-black font-bold">{Math.round(item.calories)}<span className="text-[10px] font-normal text-gray-400 ml-0.5">kcal/{item.unit === 'g' || item.unit === 'ml' ? '100' : '1'}{item.unit}</span></span>
+                             <span className="font-mono text-black font-bold">{Math.round(item.calories)}<span className="text-[9px] font-normal text-gray-400 ml-0.5">kcal/{item.unit === 'g' || item.unit === 'ml' ? '100' : '1'}{item.unit}</span></span>
                              <span className="text-gray-300">|</span>
                              <span className="font-mono text-gray-600">{fmt(item.carbs)}/{fmt(item.protein)}/{fmt(item.fat)}</span>
                           </div>
@@ -313,7 +364,8 @@ export default function SettingsPage() {
   }
 
   // --- UI Structure ---
-  const groupedTags = tags.reduce((acc, t) => { if (!acc[t.category]) acc[t.category] = []; acc[t.category].push(t); return acc; }, {});
+  const sortedTags = sortTagsSafe([...tags]);
+  const groupedTags = sortedTags.reduce((acc, t) => { if (!acc[t.category]) acc[t.category] = []; acc[t.category].push(t); return acc; }, {});
   const categoryKeys = Object.keys(groupedTags);
 
   return (
@@ -351,7 +403,7 @@ export default function SettingsPage() {
             </div>
           )}
 
-          {/* Tags Management (保持不变) */}
+          {/* Tags Management */}
           {activeTab === 'tags' && (
             <div className="space-y-6">
               <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col md:flex-row gap-4 items-end">
@@ -365,6 +417,7 @@ export default function SettingsPage() {
                     <div className="flex justify-between items-center mb-3 border-b border-gray-50 pb-2">
                        <h3 className="font-bold text-sm flex items-center gap-2 text-gray-700"><Tag size={14}/> {cat}</h3>
                        <div className="flex items-center gap-1">
+                          <button onClick={() => handleDeleteCategory(cat)} className="p-1.5 hover:bg-red-50 rounded text-gray-400 hover:text-red-500 mr-1" title="删除分类"><Trash2 size={12}/></button>
                           <button onClick={() => handleRename('category', cat)} className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-blue-600"><Pencil size={12}/></button>
                           <div className="w-[1px] h-3 bg-gray-200 mx-1"></div>
                           <button onClick={() => moveCategory(cat, 'up')} disabled={catIdx === 0} className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-black disabled:opacity-30"><ArrowUp size={12}/></button>
@@ -429,7 +482,6 @@ export default function SettingsPage() {
               <div className="bg-blue-50 p-4 rounded-xl space-y-3">
                 <div className="flex items-center gap-2 mb-2">
                   <Calculator size={14} className="text-blue-600"/>
-                  {/* Dynamic Label */}
                   <span className="text-xs font-bold text-blue-800">
                       {formData.unit === 'g' || formData.unit === 'ml' ? '每 100g/ml 含量' : `每 1 ${UNIT_OPTIONS.find(u=>u.value===formData.unit)?.label} 含量`}
                   </span>
