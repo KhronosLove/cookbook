@@ -13,7 +13,7 @@ const UNIT_OPTIONS = [
   { value: 'ml', label: '毫升 (ml)' },
   { value: 'pkg', label: '包/袋' },
   { value: 'serving', label: '份' },
-  { value: 'piece', label: '个/只' }；
+  { value: 'piece', label: '个/只' },
 
 ]
 
